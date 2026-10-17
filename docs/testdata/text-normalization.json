@@ -1,0 +1,20 @@
+{
+  "description": "index.json textHash 归一化（版本 1）测试向量。core/index 与 IDEA 插件共用，修改时两边同步。",
+  "cases": [
+    { "input": "// Hello   world", "normalized": "Hello world" },
+    { "input": "/// Line one\n/// Line two", "normalized": "Line one Line two" },
+    { "input": "//! Crate docs", "normalized": "Crate docs" },
+    { "input": "/**\n * Returns the sum.\n * @param a first\n */", "normalized": "Returns the sum. @param a first" },
+    { "input": "/* 你好 */", "normalized": "你好" },
+    { "input": "/*! inner */", "normalized": "inner" },
+    { "input": "// a\r\n// b\r\n", "normalized": "a b" },
+    { "input": "    // indented\n    // group", "normalized": "indented group" },
+    { "input": "// para one\n//\n// para two", "normalized": "para one para two" },
+    { "input": "/**\n * **bold** text\n */", "normalized": "**bold** text" },
+    { "input": "/* a */ ", "normalized": "a" },
+    { "input": "// nbsp　ideographic", "normalized": "nbsp ideographic" },
+    { "input": "/**/", "normalized": "/" },
+    { "input": "// */ tail", "normalized": "*/ tail" },
+    { "input": "", "normalized": "" }
+  ]
+}
