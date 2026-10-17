@@ -9,11 +9,11 @@ CodeI18n 是一个面向工程团队的**代码注释国际化基础设施**，�
 - 基于 AST/PSI 严格绑定注释与代码语义，避免行号/正则方式带来的不稳定
 
 ## 技术栈
-- 编程语言：Go 1.25.5（`go.mod:3`）
+- 编程语言：Go 1.27.1（`go.mod:3`），模块路径 `github.com/CairnPack/codei18n`
 - 构建与命令行：原生 Go + Makefile + Cobra CLI 框架（`go.mod:5-13`）
-- 配置管理：Viper（`go.mod:10-11`）
+- 配置管理：`core/config` 分层配置（默认 < 全局 < 项目 < 调用方覆盖），不再使用 Viper
 - 语法解析：go/parser、go/ast（Go 语言）；后续通过 tree-sitter 适配多语言（`CODEBUDDY.md:193-203`）
-- 终端交互：fatih/color、briandowns/spinner（`go.mod:5-7`）
+- 终端交互：fatih/color、briandowns/spinner（仅限 `cmd/`，库代码禁止使用）
 - 测试框架：testing + testify（`go.mod:12`）
 - 持续集成：GitHub Actions（`.github/README.md:5-43`）
 - 容器化：可选 Docker 支持，通过 Makefile 封装（`README.md:520-536`）
