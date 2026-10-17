@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"sync"
+	"time"
 
+	"github.com/briandowns/spinner"
 	"github.com/spf13/cobra"
 
+	"github.com/CairnPack/codei18n"
 	"github.com/CairnPack/codei18n/core/config"
-	"github.com/CairnPack/codei18n/core/workflow"
 	"github.com/CairnPack/codei18n/internal/log"
 )
 
@@ -28,7 +33,7 @@ var translateCmd = &cobra.Command{
 如果通过管道传入文本，则直接翻译该文本并输出到标准输出。
 可以使用 --target 和 --source 标志来覆盖默认的语言设置。`,
 	Run: func(cmd *cobra.Command, args []string) {
-		runTranslate()
+		runTranslate(cmd)
 	},
 }
 
@@ -43,33 +48,33 @@ func init() {
 	translateCmd.Flags().StringVarP(&translateSource, "source", "s", "", "指定源语言 (如 zh-CN, en)")
 }
 
-func runTranslate() {
-	// 1. Load Config
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		log.Warn("无法加载配置: %v", err)
-		cfg = config.DefaultConfig()
-	}
-
-	// Apply language overrides
+func runTranslate(cmd *cobra.Command) {
+	ov := config.Overrides{}
 	if translateTarget != "" {
-		cfg.LocalLanguage = translateTarget
+		ov.LocalLanguage = config.Ptr(translateTarget)
 	}
 	if translateSource != "" {
-		cfg.SourceLanguage = translateSource
+		ov.SourceLanguage = config.Ptr(translateSource)
 	}
-
-	opts := workflow.TranslateOptions{
-		Concurrency: translateConcurrency,
-		Provider:    translateProvider,
-		Model:       translateModel,
-		BatchSize:   translateBatchSize,
+	if translateProvider != "" {
+		ov.Provider.Provider = config.Ptr(translateProvider)
 	}
+	if translateModel != "" {
+		ov.Provider.Model = config.Ptr(translateModel)
+	}
+	if translateBatchSize > 0 {
+		ov.Provider.BatchSize = config.Ptr(translateBatchSize)
+	}
+	if cmd.Flags().Changed("concurrency") && translateConcurrency > 0 {
+		ov.Provider.Concurrency = config.Ptr(translateConcurrency)
+	}
+	p := openProject(ov)
+	ctx, cancel := signalContext()
+	defer cancel()
 
-	// Check for stdin input
+	// 管道输入：直接翻译该文本
 	stat, _ := os.Stdin.Stat()
 	if (stat.Mode() & os.ModeCharDevice) == 0 {
-		// Data is being piped to stdin
 		bytes, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			log.Fatal("Failed to read from stdin: %v", err)
@@ -78,8 +83,7 @@ func runTranslate() {
 		if text == "" {
 			return
 		}
-
-		translated, err := workflow.TranslateText(cfg, opts, text)
+		translated, err := p.TranslateText(ctx, text, "", "")
 		if err != nil {
 			log.Fatal("Translation failed: %v", err)
 		}
@@ -87,8 +91,12 @@ func runTranslate() {
 		return
 	}
 
-	result, err := workflow.Translate(cfg, opts)
+	result, err := runTranslateWithSpinner(ctx, p, codei18n.TranslateOptions{})
 	if err != nil {
+		if errors.Is(err, context.Canceled) && result != nil {
+			log.Warn("翻译已取消：已完成 %d 条，结果已保存", result.SuccessCount)
+			os.Exit(130)
+		}
 		log.Fatal("Translation failed: %v", err)
 	}
 
@@ -102,4 +110,23 @@ func runTranslate() {
 	} else {
 		log.Success("翻译完成！共处理 %d 条注释", result.SuccessCount)
 	}
+}
+
+// runTranslateWithSpinner 执行翻译并在终端显示进度。spinner 只存在于 CLI 层。
+func runTranslateWithSpinner(ctx context.Context, p *codei18n.Project, opts codei18n.TranslateOptions) (*codei18n.TranslateResult, error) {
+	s := spinner.New(spinner.CharSets[9], 100*time.Millisecond)
+	s.Suffix = " 正在翻译..."
+	s.Writer = os.Stderr
+	var once sync.Once
+	opts.Progress = func(e codei18n.Event) {
+		if e.Phase != codei18n.PhaseTranslate {
+			return
+		}
+		once.Do(s.Start)
+		s.Lock()
+		s.Suffix = fmt.Sprintf(" 正在翻译... (%d/%d)", e.Done, e.Total)
+		s.Unlock()
+	}
+	defer s.Stop()
+	return p.Translate(ctx, opts)
 }

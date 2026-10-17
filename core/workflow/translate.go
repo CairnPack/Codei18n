@@ -2,213 +2,241 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
+	"sort"
 	"sync"
-	"time"
 
-	"github.com/briandowns/spinner"
-
-	"github.com/CairnPack/codei18n/adapters/translator"
-	"github.com/CairnPack/codei18n/core/config"
+	"github.com/CairnPack/codei18n/core"
+	"github.com/CairnPack/codei18n/core/events"
 	"github.com/CairnPack/codei18n/core/mapping"
-	"github.com/CairnPack/codei18n/internal/log"
 )
 
-// TranslateOptions configures the translation workflow
+// TranslateOptions 配置翻译工作流。
 type TranslateOptions struct {
+	// Concurrency 并发批次数；<=0 时使用配置值。
 	Concurrency int
-	Provider    string
-	Model       string
-	BatchSize   int
+	// Provider / Model / BatchSize 是旧版的临时覆盖，新代码请通过 config.Overrides 传入。
+	Provider  string
+	Model     string
+	BatchSize int
+	// OnlyIDs 非空时只翻译这些注释（用于失败重试）。
+	OnlyIDs []string
 }
 
-// TranslateResult holds the result of translation workflow
+// TranslateResult 是翻译工作流的结果。
 type TranslateResult struct {
 	SuccessCount int
 	FailCount    int
 	TotalTasks   int
+	// Failed 列出失败的条目（错误信息已脱敏）。
+	Failed []Failure
+	// Canceled 表示任务被取消；已完成的结果已落盘。
+	Canceled bool
 }
 
-// Translate executes the translation workflow
-func Translate(cfg *config.Config, opts TranslateOptions) (*TranslateResult, error) {
-	// Apply overrides
-	if opts.Provider != "" {
-		cfg.TranslationProvider = opts.Provider
-	}
-	if opts.BatchSize > 0 {
-		cfg.BatchSize = opts.BatchSize
-	}
-	if opts.Model != "" {
-		if cfg.TranslationConfig == nil {
-			cfg.TranslationConfig = make(map[string]string)
-		}
-		cfg.TranslationConfig["model"] = opts.Model
-	}
+// Failure 是一条翻译失败记录。
+type Failure struct {
+	ID    string `json:"id"`
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Error string `json:"error"`
+}
 
-	// 2. Init Translator
-	trans, err := translator.NewFromConfig(cfg)
+type task struct {
+	id       string
+	text     string
+	fromLang string
+	toLang   string
+}
+
+// TranslateMissing 翻译 mappings.json 中缺失的条目。ctx 取消后不再派发新批次，
+// 等待进行中的批次结束（其请求也会随 ctx 取消），保存已完成的结果后返回 ctx.Err()。
+func TranslateMissing(ctx context.Context, env *Env, opts TranslateOptions) (*TranslateResult, error) {
+	log := env.log()
+	trans, err := env.translator()
 	if err != nil {
 		return nil, fmt.Errorf("初始化翻译引擎失败: %w", err)
 	}
-
-	// 3. Load Mapping
-	storePath := filepath.Join(".codei18n", "mappings.json")
-	store := mapping.NewStore(storePath)
-	if err := store.Load(); err != nil {
+	store, err := env.loadStore()
+	if err != nil {
 		return nil, fmt.Errorf("加载映射文件失败: %w", err)
 	}
 
-	m := store.GetMapping()
-
-	// 4. Identify missing translations
-	type task struct {
-		id       string
-		text     string
-		fromLang string
-		toLang   string
-	}
-	var tasks []task
-
-	for id, translations := range m.Comments {
-		// Case 1: EN exists, ZH missing -> Translate EN to ZH
-		if enText, hasEn := translations[cfg.SourceLanguage]; hasEn && enText != "" {
-			if zhText, hasZh := translations[cfg.LocalLanguage]; !hasZh || zhText == "" {
-				tasks = append(tasks, task{
-					id:       id,
-					text:     enText,
-					fromLang: cfg.SourceLanguage,
-					toLang:   cfg.LocalLanguage,
-				})
-			}
-		}
-
-		// Case 2: ZH exists, EN missing -> Translate ZH to EN (reverse translation)
-		if zhText, hasZh := translations[cfg.LocalLanguage]; hasZh && zhText != "" {
-			if enText, hasEn := translations[cfg.SourceLanguage]; !hasEn || enText == "" {
-				tasks = append(tasks, task{
-					id:       id,
-					text:     zhText,
-					fromLang: cfg.LocalLanguage,
-					toLang:   cfg.SourceLanguage,
-				})
-			}
-		}
-	}
-
+	tasks := collectTasks(store, env.Config.SourceLanguage.Value, env.Config.LocalLanguage.Value, opts.OnlyIDs)
 	if len(tasks) == 0 {
 		return &TranslateResult{TotalTasks: 0}, nil
 	}
 
-	log.Info("发现 %d 条待翻译注释，开始批量翻译 (BatchSize=%d, Concurrency=%d)...", len(tasks), cfg.BatchSize, opts.Concurrency)
-
-	// 5. Process with Batching and Concurrency
-	s := spinner.New(spinner.CharSets[9], 100*time.Millisecond)
-	s.Suffix = " 正在翻译..."
-	s.Writer = os.Stderr
-	s.Start()
-
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, opts.Concurrency)
-	successCount := 0
-	failCount := 0
-	var countMu sync.Mutex
-
-	// Split tasks into batches
-	batchSize := cfg.BatchSize
+	batchSize := opts.BatchSize
 	if batchSize <= 0 {
-		batchSize = 10 // Safe default
+		batchSize = env.Config.Provider.BatchSize.Value
+	}
+	if batchSize <= 0 {
+		batchSize = 10
+	}
+	concurrency := opts.Concurrency
+	if concurrency <= 0 {
+		concurrency = env.Config.Provider.Concurrency.Value
+	}
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	log.Infof("发现 %d 条待翻译注释，开始批量翻译 (BatchSize=%d, Concurrency=%d)...", len(tasks), batchSize, concurrency)
+
+	failures, err := loadFailures(env)
+	if err != nil {
+		log.Warnf("读取失败记录出错，将重新记录: %v", err)
+		failures = map[string]Failure{}
 	}
 
-	batches := make([][]task, 0, (len(tasks)+batchSize-1)/batchSize)
+	res := &TranslateResult{TotalTasks: len(tasks)}
+	var (
+		wg sync.WaitGroup
+		mu sync.Mutex
+	)
+	sem := make(chan struct{}, concurrency)
+	processed := 0
+
+dispatch:
 	for i := 0; i < len(tasks); i += batchSize {
-		end := i + batchSize
-		if end > len(tasks) {
-			end = len(tasks)
+		batch := tasks[i:min(i+batchSize, len(tasks))]
+		select {
+		case <-ctx.Done():
+			break dispatch
+		case sem <- struct{}{}:
 		}
-		batches = append(batches, tasks[i:end])
-	}
-
-	for _, batch := range batches {
+		if ctx.Err() != nil {
+			<-sem
+			break
+		}
 		wg.Add(1)
-		sem <- struct{}{} // Acquire token
-
-		go func(currentBatch []task) {
+		go func(batch []task) {
 			defer wg.Done()
-			defer func() { <-sem }() // Release token
+			defer func() { <-sem }()
+			results, err := translateBatch(ctx, trans, batch)
 
-			// Prepare batch input
-			texts := make([]string, len(currentBatch))
-			for i, t := range currentBatch {
-				texts[i] = t.text
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				return // 因取消而中断的批次：不计成功也不计失败
 			}
-
-			// Group by direction
-			// Let's assume for typical usage (filling missing), it's usually En->Zh.
-			// But mixed is possible.
-			from := currentBatch[0].fromLang
-			to := currentBatch[0].toLang
-			consistent := true
-			for _, t := range currentBatch {
-				if t.fromLang != from || t.toLang != to {
-					consistent = false
-					break
-				}
-			}
-
-			var results []string
-			var err error
-
-			if consistent {
-				results, err = trans.TranslateBatch(context.Background(), texts, from, to)
-			} else {
-				// Mixed batch, fallback to sequential loop manually here
-				results = make([]string, len(currentBatch))
-				for i, t := range currentBatch {
-					res, e := trans.Translate(context.Background(), t.text, t.fromLang, t.toLang)
-					if e != nil {
-						err = e // Capture last error
-						break
-					}
-					results[i] = res
-				}
-			}
-
-			countMu.Lock()
-
 			if err != nil {
-				failCount += len(currentBatch)
-			} else {
-				// Save results
-				for i, res := range results {
-					t := currentBatch[i]
-					store.Set(t.id, t.toLang, res)
-					successCount++
+				msg := SanitizeError(err)
+				for _, t := range batch {
+					res.FailCount++
+					failures[failureKey(t)] = Failure{ID: t.id, From: t.fromLang, To: t.toLang, Error: msg}
 				}
-				// Save progress immediately
+			} else {
+				for i, r := range results {
+					t := batch[i]
+					store.Set(t.id, t.toLang, r)
+					delete(failures, failureKey(t))
+					res.SuccessCount++
+				}
 				if err := store.Save(); err != nil {
-					log.Warn("保存进度失败: %v", err)
+					log.Warnf("保存进度失败: %v", err)
 				}
 			}
-
-			countMu.Unlock()
-
-			s.Suffix = fmt.Sprintf(" 正在翻译... (%d/%d 成功, %d 失败)", successCount, len(tasks), failCount)
+			processed += len(batch)
+			env.Progress.Emit(events.Event{Phase: events.PhaseTranslate, Done: processed, Total: len(tasks)})
 		}(batch)
 	}
-
 	wg.Wait()
-	s.Stop()
 
-	// 6. Save
+	env.Progress.Emit(events.Event{Phase: events.PhaseSave, Done: 0, Total: 1})
 	if err := store.Save(); err != nil {
 		return nil, fmt.Errorf("保存映射文件失败: %w", err)
 	}
+	if err := saveFailures(env, failures); err != nil {
+		log.Warnf("保存失败记录出错: %v", err)
+	}
+	inRun := make(map[string]bool, len(tasks))
+	for _, t := range tasks {
+		inRun[failureKey(t)] = true
+	}
+	for k, f := range failures {
+		if inRun[k] {
+			res.Failed = append(res.Failed, f)
+		}
+	}
+	sort.Slice(res.Failed, func(i, j int) bool { return res.Failed[i].ID < res.Failed[j].ID })
 
-	return &TranslateResult{
-		SuccessCount: successCount,
-		FailCount:    failCount,
-		TotalTasks:   len(tasks),
-	}, nil
+	if err := ctx.Err(); err != nil {
+		res.Canceled = true
+		return res, err
+	}
+	env.Progress.Emit(events.Event{Phase: events.PhaseDone, Done: len(tasks), Total: len(tasks)})
+	return res, nil
 }
+
+// PendingCount 返回需要翻译的条目数（与 TranslateMissing 的任务数一致）。
+func PendingCount(store *mapping.Store, source, local string) int {
+	return len(collectTasks(store, source, local, nil))
+}
+
+// collectTasks 找出缺失的翻译：源语言有、本地语言缺 → 正向；本地语言有、源语言缺 → 反向。
+func collectTasks(store *mapping.Store, source, local string, only []string) []task {
+	m := store.Snapshot()
+	ids := make([]string, 0, len(m.Comments))
+	if len(only) > 0 {
+		ids = append(ids, only...)
+	} else {
+		for id := range m.Comments {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids) // 稳定的顺序便于测试与断点续传
+	var tasks []task
+	for _, id := range ids {
+		translations, ok := m.Comments[id]
+		if !ok {
+			continue
+		}
+		if enText := translations[source]; enText != "" {
+			if translations[local] == "" {
+				tasks = append(tasks, task{id: id, text: enText, fromLang: source, toLang: local})
+			}
+		}
+		if zhText := translations[local]; zhText != "" {
+			if translations[source] == "" {
+				tasks = append(tasks, task{id: id, text: zhText, fromLang: local, toLang: source})
+			}
+		}
+	}
+	return tasks
+}
+
+// translateBatch 方向一致时整批请求，否则逐条翻译。
+func translateBatch(ctx context.Context, trans core.Translator, batch []task) ([]string, error) {
+	from, to := batch[0].fromLang, batch[0].toLang
+	consistent := true
+	for _, t := range batch {
+		if t.fromLang != from || t.toLang != to {
+			consistent = false
+			break
+		}
+	}
+	if consistent {
+		texts := make([]string, len(batch))
+		for i, t := range batch {
+			texts[i] = t.text
+		}
+		results, err := trans.TranslateBatch(ctx, texts, from, to)
+		if err == nil && len(results) != len(texts) {
+			err = fmt.Errorf("翻译结果数量不匹配 (in=%d, out=%d)", len(texts), len(results))
+		}
+		return results, err
+	}
+	results := make([]string, len(batch))
+	for i, t := range batch {
+		r, err := trans.Translate(ctx, t.text, t.fromLang, t.toLang)
+		if err != nil {
+			return nil, err
+		}
+		results[i] = r
+	}
+	return results, nil
+}
+
+func failureKey(t task) string { return t.id + "\x00" + t.toLang }

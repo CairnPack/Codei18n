@@ -111,8 +111,8 @@ func TestInitGlobalConfigInheritance(t *testing.T) {
 
 	cmd := exec.Command(bin, "init")
 	cmd.Dir = projectDir
-	// Mock HOME to point to fake_home
-	cmd.Env = append(os.Environ(), "HOME="+fakeHome)
+	// Mock HOME to point to fake_home（Windows 上 os.UserHomeDir 读取 USERPROFILE）
+	cmd.Env = append(os.Environ(), "HOME="+fakeHome, "USERPROFILE="+fakeHome)
 
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))

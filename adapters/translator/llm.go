@@ -8,13 +8,14 @@ import (
 
 	openai "github.com/sashabaranov/go-openai"
 
-	"github.com/CairnPack/codei18n/internal/log"
+	"github.com/CairnPack/codei18n/core/logging"
 )
 
 // LLMTranslator implements Translator using OpenAI compatible API
 type LLMTranslator struct {
 	client *openai.Client
 	model  string
+	log    logging.Logger
 }
 
 // NewLLMTranslator creates a new translator.
@@ -31,6 +32,7 @@ func NewLLMTranslator(apiKey, baseURL, model string) *LLMTranslator {
 	return &LLMTranslator{
 		client: client,
 		model:  model,
+		log:    logging.Nop{},
 	}
 }
 
@@ -105,12 +107,12 @@ func (t *LLMTranslator) TranslateBatch(ctx context.Context, texts []string, from
 	)
 
 	if err != nil {
-		log.Warn("Batch translation API failed: %v. Falling back to sequential.", err)
+		t.log.Warnf("Batch translation API failed: %v. Falling back to sequential.", err)
 		return t.translateSequential(ctx, texts, from, to)
 	}
 
 	if len(resp.Choices) == 0 {
-		log.Warn("Batch translation returned empty choices. Falling back to sequential.")
+		t.log.Warnf("Batch translation returned empty choices. Falling back to sequential.")
 		return t.translateSequential(ctx, texts, from, to)
 	}
 
@@ -119,13 +121,13 @@ func (t *LLMTranslator) TranslateBatch(ctx context.Context, texts []string, from
 	// 3. Parse JSON
 	results, err := parseBatchResponse(content)
 	if err != nil {
-		log.Warn("Batch translation JSON parse failed: %v. Content: %s... Falling back to sequential.", err, truncate(content, 50))
+		t.log.Warnf("Batch translation JSON parse failed: %v. Content: %s... Falling back to sequential.", err, truncate(content, 50))
 		return t.translateSequential(ctx, texts, from, to)
 	}
 
 	// 4. Verify Length
 	if len(results) != len(texts) {
-		log.Warn("Batch translation length mismatch (in=%d, out=%d). Falling back to sequential.", len(texts), len(results))
+		t.log.Warnf("Batch translation length mismatch (in=%d, out=%d). Falling back to sequential.", len(texts), len(results))
 		return t.translateSequential(ctx, texts, from, to)
 	}
 
