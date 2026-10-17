@@ -122,7 +122,7 @@ dispatch:
 				return // 因取消而中断的批次：不计成功也不计失败
 			}
 			if err != nil {
-				msg := SanitizeError(err)
+				msg := env.sanitize(err)
 				for _, t := range batch {
 					res.FailCount++
 					failures[failureKey(t)] = Failure{ID: t.id, From: t.fromLang, To: t.toLang, Error: msg}

@@ -66,6 +66,7 @@ type settings struct {
 	configFile string
 	overrides  config.Overrides
 	translator core.Translator
+	secrets    SecretStore
 	getenv     func(string) string
 }
 
@@ -182,6 +183,7 @@ func (p *Project) env(progress ProgressFunc) (*workflow.Env, error) {
 	if err != nil {
 		return nil, err
 	}
+	r := &redactor{}
 	return &workflow.Env{
 		Root:       p.root,
 		Config:     cfg,
@@ -189,7 +191,8 @@ func (p *Project) env(progress ProgressFunc) (*workflow.Env, error) {
 		Progress:   progress,
 		Generator:  "codei18n/" + Version,
 		Translator: p.s.translator,
-		Key:        p.keySource(cfg),
+		Key:        p.keySource(cfg, r),
+		Redact:     r.redact,
 	}, nil
 }
 
