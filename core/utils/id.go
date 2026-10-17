@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/studyzy/codei18n/core/domain"
+	"github.com/CairnPack/codei18n/core/domain"
 )
 
 // GenerateCommentID calculates a stable ID for a comment

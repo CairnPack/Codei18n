@@ -5,11 +5,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/studyzy/codei18n/adapters/golang"
-	"github.com/studyzy/codei18n/adapters/java"
-	"github.com/studyzy/codei18n/adapters/rust"
-	"github.com/studyzy/codei18n/adapters/typescript"
-	"github.com/studyzy/codei18n/core"
+	"github.com/CairnPack/codei18n/adapters/golang"
+	"github.com/CairnPack/codei18n/adapters/java"
+	"github.com/CairnPack/codei18n/adapters/rust"
+	"github.com/CairnPack/codei18n/adapters/typescript"
+	"github.com/CairnPack/codei18n/core"
 )
 
 // GetAdapter returns the appropriate LanguageAdapter for the given file

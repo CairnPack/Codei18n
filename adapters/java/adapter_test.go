@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/studyzy/codei18n/core/domain"
+	"github.com/CairnPack/codei18n/core/domain"
 )
 
 func TestAdapter_Parse_Class(t *testing.T) {

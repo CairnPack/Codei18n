@@ -10,13 +10,13 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/spf13/cobra"
 
-	"github.com/studyzy/codei18n/adapters"
-	"github.com/studyzy/codei18n/core"
-	"github.com/studyzy/codei18n/core/config"
-	"github.com/studyzy/codei18n/core/domain"
-	"github.com/studyzy/codei18n/core/mapping"
-	"github.com/studyzy/codei18n/core/utils"
-	"github.com/studyzy/codei18n/internal/log"
+	"github.com/CairnPack/codei18n/adapters"
+	"github.com/CairnPack/codei18n/core"
+	"github.com/CairnPack/codei18n/core/config"
+	"github.com/CairnPack/codei18n/core/domain"
+	"github.com/CairnPack/codei18n/core/mapping"
+	"github.com/CairnPack/codei18n/core/utils"
+	"github.com/CairnPack/codei18n/internal/log"
 )
 
 var (

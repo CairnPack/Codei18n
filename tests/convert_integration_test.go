@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/studyzy/codei18n/adapters"
-	"github.com/studyzy/codei18n/core/mapping"
-	"github.com/studyzy/codei18n/core/utils"
+	"github.com/CairnPack/codei18n/adapters"
+	"github.com/CairnPack/codei18n/core/mapping"
+	"github.com/CairnPack/codei18n/core/utils"
 )
 
 // We can reuse the logic from convert.go but since it is in main package, we can't easily import it.

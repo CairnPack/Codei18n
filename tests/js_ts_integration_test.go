@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/studyzy/codei18n/adapters"
-	"github.com/studyzy/codei18n/core/domain"
+	"github.com/CairnPack/codei18n/adapters"
+	"github.com/CairnPack/codei18n/core/domain"
 )
 
 func TestJS_TS_Integration(t *testing.T) {

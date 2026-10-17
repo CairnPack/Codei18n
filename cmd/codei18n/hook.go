@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/studyzy/codei18n/internal/log"
+	"github.com/CairnPack/codei18n/internal/log"
 )
 
 var hookCmd = &cobra.Command{

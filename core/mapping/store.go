@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/studyzy/codei18n/core/domain"
+	"github.com/CairnPack/codei18n/core/domain"
 )
 
 // Store manages the persistence and concurrent access of mappings

@@ -3,7 +3,7 @@ package log_test
 import (
 	"testing"
 
-	"github.com/studyzy/codei18n/internal/log"
+	"github.com/CairnPack/codei18n/internal/log"
 )
 
 // This test is manual verification mainly, but ensures compilation and basic function availability

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/studyzy/codei18n/adapters/translator"
-	"github.com/studyzy/codei18n/core/config"
+	"github.com/CairnPack/codei18n/adapters/translator"
+	"github.com/CairnPack/codei18n/core/config"
 )
 
 // TranslateText translates a single text string with options

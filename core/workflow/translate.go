@@ -10,10 +10,10 @@ import (
 
 	"github.com/briandowns/spinner"
 
-	"github.com/studyzy/codei18n/adapters/translator"
-	"github.com/studyzy/codei18n/core/config"
-	"github.com/studyzy/codei18n/core/mapping"
-	"github.com/studyzy/codei18n/internal/log"
+	"github.com/CairnPack/codei18n/adapters/translator"
+	"github.com/CairnPack/codei18n/core/config"
+	"github.com/CairnPack/codei18n/core/mapping"
+	"github.com/CairnPack/codei18n/internal/log"
 )
 
 // TranslateOptions configures the translation workflow

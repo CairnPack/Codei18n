@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/studyzy/codei18n/core/config"
-	"github.com/studyzy/codei18n/core/mapping"
-	"github.com/studyzy/codei18n/core/workflow"
-	"github.com/studyzy/codei18n/internal/log"
+	"github.com/CairnPack/codei18n/core/config"
+	"github.com/CairnPack/codei18n/core/mapping"
+	"github.com/CairnPack/codei18n/core/workflow"
+	"github.com/CairnPack/codei18n/internal/log"
 )
 
 var (

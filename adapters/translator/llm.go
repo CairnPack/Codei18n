@@ -8,7 +8,7 @@ import (
 
 	openai "github.com/sashabaranov/go-openai"
 
-	"github.com/studyzy/codei18n/internal/log"
+	"github.com/CairnPack/codei18n/internal/log"
 )
 
 // LLMTranslator implements Translator using OpenAI compatible API

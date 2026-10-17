@@ -18,7 +18,7 @@ jobs:
       - name: 设置 Go 环境
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.5'
+          go-version: '1.27.1'
           cache: true
 
       - name: 验证 go.mod 和 go.sum
@@ -39,7 +39,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: ['1.25.5']
+        go-version: ['1.27.1']
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -76,7 +76,7 @@ jobs:
       - name: 设置 Go 环境
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.5'
+          go-version: '1.27.1'
           cache: true
 
       - name: 运行测试
@@ -128,7 +128,7 @@ jobs:
       - name: 设置 Go 环境
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.5'
+          go-version: '1.27.1'
           cache: true
 
       - name: 构建
@@ -170,7 +170,7 @@ jobs:
       - name: 设置 Go 环境
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.5'
+          go-version: '1.27.1'
           cache: true
 
       - name: 运行 gosec 安全扫描
@@ -196,7 +196,7 @@ jobs:
       - name: 设置 Go 环境
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.5'
+          go-version: '1.27.1'
           cache: true
 
       - name: 检查过时的依赖

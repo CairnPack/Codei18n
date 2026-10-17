@@ -6,8 +6,8 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/rust"
 
-	"github.com/studyzy/codei18n/core/domain"
-	"github.com/studyzy/codei18n/core/utils"
+	"github.com/CairnPack/codei18n/core/domain"
+	"github.com/CairnPack/codei18n/core/utils"
 )
 
 // extractComments processes the AST and extracts all comments matching the query.

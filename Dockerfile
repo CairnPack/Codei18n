@@ -1,7 +1,7 @@
 # 多阶段构建 Dockerfile for CodeI18n
 
 # 阶段 1: 构建
-FROM golang:1.25.5-alpine AS builder
+FROM golang:1.27.1-alpine AS builder
 
 # 设置工作目录
 WORKDIR /build

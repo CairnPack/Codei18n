@@ -1,6 +1,6 @@
-module github.com/studyzy/codei18n
+module github.com/CairnPack/codei18n
 
-go 1.25.5
+go 1.27.1
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.9.1

@@ -8,9 +8,9 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 
-	"github.com/studyzy/codei18n/adapters"
-	"github.com/studyzy/codei18n/core/domain"
-	"github.com/studyzy/codei18n/internal/log"
+	"github.com/CairnPack/codei18n/adapters"
+	"github.com/CairnPack/codei18n/core/domain"
+	"github.com/CairnPack/codei18n/internal/log"
 )
 
 // FromStdin scans code from standard input
