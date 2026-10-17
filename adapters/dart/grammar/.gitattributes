@@ -1,0 +1,3 @@
+# 生成的语法表，体积大，不参与 diff
+parser.c linguist-generated=true -diff
+parser.h linguist-generated=true
