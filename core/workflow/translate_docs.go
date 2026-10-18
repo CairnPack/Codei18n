@@ -20,9 +20,8 @@ func (u *unit) payload() string {
 
 // prepareDocs 根据 index.json 中的编程语言与注释类型，为文档注释准备结构化翻译（docs/index-format.md、core/docfmt）。
 // 返回仍需翻译的 unit，以及正文全是受保护片段、直接沿用原文的 unit。没有 index.json 时保持原样（整段翻译）。
-func prepareDocs(env *Env, units []*unit) (todo, direct []*unit) {
-	idx, err := index.Read(env.IndexPath())
-	if err != nil || idx == nil {
+func prepareDocs(env *Env, idx *index.Index, units []*unit) (todo, direct []*unit) {
+	if idx == nil {
 		return units, nil
 	}
 	formats := map[string]docfmt.Format{}

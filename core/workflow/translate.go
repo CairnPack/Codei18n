@@ -10,6 +10,8 @@ import (
 
 	"github.com/CairnPack/codei18n/core"
 	"github.com/CairnPack/codei18n/core/events"
+	"github.com/CairnPack/codei18n/core/index"
+	"github.com/CairnPack/codei18n/core/langcode"
 	"github.com/CairnPack/codei18n/core/mapping"
 )
 
@@ -72,7 +74,12 @@ func TranslateMissing(ctx context.Context, env *Env, opts TranslateOptions) (*Tr
 		return nil, fmt.Errorf("加载映射文件失败: %w", err)
 	}
 
-	tasks := collectTasks(store, env.Config.SourceLanguage.Value, env.Config.LocalLanguage.Value, opts.OnlyIDs)
+	idx, err := index.Read(env.IndexPath())
+	if err != nil {
+		log.Warnf("读取 index.json 失败，按旧规则判断翻译方向: %v", err)
+		idx = nil
+	}
+	tasks := collectTasks(store, env.Config.SourceLanguage.Value, env.Config.LocalLanguage.Value, opts.OnlyIDs, originsFrom(idx))
 	if len(tasks) == 0 {
 		return &TranslateResult{TotalTasks: 0}, nil
 	}
@@ -102,7 +109,7 @@ func TranslateMissing(ctx context.Context, env *Env, opts TranslateOptions) (*Tr
 	units := dedupe(tasks)
 	res := &TranslateResult{TotalTasks: len(tasks)}
 	// 文档注释：受保护片段换成占位符后再发给翻译器；全是受保护片段的注释不需要翻译。
-	units, direct := prepareDocs(env, units)
+	units, direct := prepareDocs(env, idx, units)
 	for _, u := range direct {
 		for _, t := range u.tasks {
 			store.Set(t.id, t.toLang, u.text)
@@ -203,13 +210,42 @@ dispatch:
 	return res, nil
 }
 
-// PendingCount 返回需要翻译的条目数（与 TranslateMissing 的任务数一致）。
-func PendingCount(store *mapping.Store, source, local string) int {
-	return len(collectTasks(store, source, local, nil))
+
+// PendingCount 返回需要翻译的条目数（与 TranslateMissing 的任务数一致）。idx 可以为 nil（按旧规则判断）。
+func PendingCount(store *mapping.Store, source, local string, idx ...*index.Index) int {
+	var origins map[string]origin
+	if len(idx) > 0 {
+		origins = originsFrom(idx[0])
+	}
+	return len(collectTasks(store, source, local, nil, origins))
 }
 
-// collectTasks 找出缺失的翻译：源语言有、本地语言缺 → 正向；本地语言有、源语言缺 → 反向。
-func collectTasks(store *mapping.Store, source, local string, only []string) []task {
+// origin 是一条注释原文所在的 mappings 键与识别出的原语言（来自 index.json）。
+type origin struct {
+	key  string
+	lang string
+}
+
+func originsFrom(idx *index.Index) map[string]origin {
+	if idx == nil {
+		return nil
+	}
+	out := map[string]origin{}
+	for _, f := range idx.Files {
+		for _, c := range f.Comments {
+			out[c.ID] = origin{key: c.SourceKey, lang: c.Lang}
+		}
+	}
+	return out
+}
+
+// collectTasks 找出缺失的翻译。
+//
+// 有 index.json 时：原文在 sourceKey 下、原语言为 lang（unknown 时视为 sourceKey 的语言），
+// 目标为 {源语言, 本地语言} 中与原语言不等价、且尚无文本的那些——源语言注释补本地语言，本地语言注释补源语言，
+// 第三种语言（如 ja）的注释两者都补。
+// 没有 index.json（或该 ID 不在索引中）时沿用旧规则：源语言有、本地语言缺 → 正向；本地语言有、源语言缺 → 反向。
+func collectTasks(store *mapping.Store, source, local string, only []string, origins map[string]origin) []task {
 	m := store.Snapshot()
 	ids := make([]string, 0, len(m.Comments))
 	if len(only) > 0 {
@@ -224,6 +260,22 @@ func collectTasks(store *mapping.Store, source, local string, only []string) []t
 	for _, id := range ids {
 		translations, ok := m.Comments[id]
 		if !ok {
+			continue
+		}
+		if o, ok := origins[id]; ok && translations[o.key] != "" {
+			from := o.lang
+			if from == "" || from == langcode.Unknown {
+				from = o.key
+			}
+			for _, target := range []string{local, source} {
+				if langcode.Equivalent(target, from) || langcode.Equivalent(target, o.key) {
+					continue
+				}
+				if k := langcode.FindKey(translations, target); k != "" && translations[k] != "" {
+					continue
+				}
+				tasks = append(tasks, task{id: id, text: translations[o.key], fromLang: from, toLang: target})
+			}
 			continue
 		}
 		if enText := translations[source]; enText != "" {

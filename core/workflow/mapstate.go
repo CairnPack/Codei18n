@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"sync"
 
+	"github.com/CairnPack/codei18n/core/domain"
 	"github.com/CairnPack/codei18n/core/index"
 	"github.com/CairnPack/codei18n/core/langdetect"
 	"github.com/CairnPack/codei18n/core/scanner"
@@ -134,12 +136,14 @@ type langCacheFile struct {
 	Entries map[string]langdetect.Result
 }
 
+// openLangCache 打开识别缓存；dir 为空时只在内存中使用（仍用于并行预识别与去重），不落盘。
 func openLangCache(dir string, d langdetect.Detector) *langCache {
+	c := &langCache{old: map[string]langdetect.Result{}, used: map[string]langdetect.Result{}}
 	k, ok := d.(langdetect.CacheKeyer)
-	if !ok {
-		return nil
+	if !ok || dir == "" {
+		return c
 	}
-	c := &langCache{path: filepath.Join(dir, langCacheFileName), key: k.CacheKey(), old: map[string]langdetect.Result{}, used: map[string]langdetect.Result{}}
+	c.path, c.key = filepath.Join(dir, langCacheFileName), k.CacheKey()
 	if data, err := os.ReadFile(c.path); err == nil {
 		var f langCacheFile
 		if gob.NewDecoder(bytes.NewReader(data)).Decode(&f) == nil && f.Key == c.key && f.Entries != nil {
@@ -165,8 +169,47 @@ func (c *langCache) detect(d langdetect.Detector, textHash, text string) langdet
 	return r
 }
 
+// prefetch 并行识别缓存中没有的文本（按 textHash 去重）。识别器必须是并发安全的（Detector 接口的约定）。
+func (c *langCache) prefetch(d langdetect.Detector, items []*domain.Comment, skip func(*domain.Comment) bool, workers int) {
+	todo := map[string]string{}
+	for _, it := range items {
+		if skip(it) {
+			continue
+		}
+		if _, ok := c.old[it.TextHash]; ok {
+			continue
+		}
+		todo[it.TextHash] = it.SourceText
+	}
+	if len(todo) == 0 {
+		return
+	}
+	type job struct{ hash, text string }
+	jobs := make(chan job)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for w := 0; w < max(1, min(workers, len(todo))); w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				r := d.Detect(j.text)
+				mu.Lock()
+				c.old[j.hash] = r
+				mu.Unlock()
+			}
+		}()
+	}
+	for h, t := range todo {
+		jobs <- job{h, t}
+	}
+	close(jobs)
+	wg.Wait()
+	c.added = true
+}
+
 func (c *langCache) save() error {
-	if c == nil || (!c.added && len(c.used) == len(c.old)) {
+	if c == nil || c.path == "" || (!c.added && len(c.used) == len(c.old)) {
 		return nil
 	}
 	var buf bytes.Buffer

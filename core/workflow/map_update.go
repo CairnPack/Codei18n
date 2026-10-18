@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -69,7 +70,7 @@ func UpdateMappings(ctx context.Context, env *Env, opts MapUpdateOptions) (*MapU
 	}
 	detector := opts.Detector
 	if detector == nil {
-		detector = defaultDetector()
+		detector = defaultDetector(env)
 	}
 	cfg := env.Config
 
@@ -144,10 +145,11 @@ func UpdateMappings(ctx context.Context, env *Env, opts MapUpdateOptions) (*MapU
 	if !inRoot {
 		log.Warnf("扫描目录 %s 不在项目根目录 %s 内，跳过 index.json", scanDir, env.Root)
 	}
-	var langs *langCache
+	cacheDir := ""
 	if useCache {
-		langs = openLangCache(env.CacheDir(), detector)
+		cacheDir = env.CacheDir()
 	}
+	langs := openLangCache(cacheDir, detector)
 
 	idx := index.New()
 	idx.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
@@ -156,6 +158,16 @@ func UpdateMappings(ctx context.Context, env *Env, opts MapUpdateOptions) (*MapU
 	idx.LocalLanguage = cfg.LocalLanguage.Value
 
 	all := scan.Comments()
+	for _, c := range all {
+		if c.TextHash == "" {
+			c.TextHash = index.TextHash(c.SourceText)
+		}
+	}
+	workers := opts.Workers
+	if workers <= 0 {
+		workers = runtime.NumCPU()
+	}
+	langs.prefetch(detector, all, func(c *domain.Comment) bool { return overrides.Languages[c.ID] != "" }, workers)
 	var mig *migrator // 只有出现新 ID 时才构建孤儿表
 	total, done := len(all), 0
 	for _, f := range scan.Files {
@@ -285,7 +297,15 @@ func ensureCacheIgnored(dir string) {
 	_ = atomicfile.WriteFile(path, []byte("# CodeI18n 增量扫描缓存，可随时删除\n*\n"), 0o644)
 }
 
-func defaultDetector() langdetect.Detector { return langdetect.Legacy{} }
+// defaultDetector 按配置的候选语言构建多语种识别器；候选集合不受支持时警告并退回旧规则。
+func defaultDetector(env *Env) langdetect.Detector {
+	d, err := langdetect.New(env.Config.DetectLanguages.Value)
+	if err != nil {
+		env.log().Warnf("语种识别候选集合无效，退回旧规则（含汉字视为中文）: %v", err)
+		return langdetect.Legacy{}
+	}
+	return d
+}
 
 // resolveLang 返回注释的原语言：用户纠正优先，其次是识别结果（按文本 hash 缓存）。
 func resolveLang(c *domain.Comment, d langdetect.Detector, o *index.Overrides, cache *langCache) langdetect.Result {
@@ -296,13 +316,18 @@ func resolveLang(c *domain.Comment, d langdetect.Detector, o *index.Overrides, c
 }
 
 // StorageKey 决定原语言为 lang 的注释原文在 mappings.json 中使用的语言键：
-// 与本地语言等价时用本地语言的配置写法，否则（含无法识别）使用源语言的配置写法，与旧版行为一致。
+// 与本地语言 / 源语言等价时用配置里的写法（例如 zh-CN），保持老插件兼容；无法识别时用源语言写法（旧行为）；
+// 其他语言（例如 ja）用规范化语言码。
 func StorageKey(cfg *config.Effective, lang string) string {
-	local := cfg.LocalLanguage.Value
-	if langcode.Equivalent(lang, local) {
+	local, source := cfg.LocalLanguage.Value, cfg.SourceLanguage.Value
+	switch {
+	case langcode.Equivalent(lang, local):
 		return local
+	case langcode.Equivalent(lang, source), lang == "", lang == langcode.Unknown:
+		return source
+	default:
+		return langcode.Canonical(lang)
 	}
-	return cfg.SourceLanguage.Value
 }
 
 // existingSourceKey 对已存在的条目，找出原文实际所在的键（文本与源码一致者），优先使用规则给出的键。
