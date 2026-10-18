@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/CairnPack/codei18n/core/docfmt"
 	"github.com/CairnPack/codei18n/core/logging"
 	"github.com/CairnPack/codei18n/core/mapping"
 	"github.com/CairnPack/codei18n/core/utils"
@@ -16,6 +17,8 @@ type unit struct {
 	fromLang string
 	toLang   string
 	tasks    []task
+	// prep 非 nil 表示文档注释的结构化翻译（受保护片段已换成占位符）。
+	prep *docfmt.Prepared
 }
 
 // dedupe 按 (from, to, 归一化原文) 合并任务，保持首次出现的顺序。

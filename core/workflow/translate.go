@@ -100,7 +100,16 @@ func TranslateMissing(ctx context.Context, env *Env, opts TranslateOptions) (*Tr
 	}
 
 	units := dedupe(tasks)
-	res := &TranslateResult{TotalTasks: len(tasks), Requests: len(units)}
+	res := &TranslateResult{TotalTasks: len(tasks)}
+	// 文档注释：受保护片段换成占位符后再发给翻译器；全是受保护片段的注释不需要翻译。
+	units, direct := prepareDocs(env, units)
+	for _, u := range direct {
+		for _, t := range u.tasks {
+			store.Set(t.id, t.toLang, u.text)
+			res.SuccessCount++
+		}
+	}
+	res.Requests = len(units)
 	var (
 		wg sync.WaitGroup
 		mu sync.Mutex
@@ -143,12 +152,19 @@ dispatch:
 					}
 				}
 			} else {
-				for i, r := range results {
-					for _, t := range batch[i].tasks {
-						store.Set(t.id, t.toLang, r)
+				// 还原占位符并校验；不一致的单条重试 1 次，仍失败则记为失败、不写入坏译文。
+				outs, errs := restoreUnits(ctx, trans, batch, results)
+				for i, u := range batch {
+					for _, t := range u.tasks {
+						n++
+						if errs[i] != nil {
+							res.FailCount++
+							failures[failureKey(t)] = Failure{ID: t.id, From: t.fromLang, To: t.toLang, Error: env.sanitize(errs[i])}
+							continue
+						}
+						store.Set(t.id, t.toLang, outs[i])
 						delete(failures, failureKey(t))
 						res.SuccessCount++
-						n++
 					}
 				}
 				sv.batchDone()
@@ -237,7 +253,7 @@ func translateBatch(ctx context.Context, trans core.Translator, batch []*unit) (
 	if consistent {
 		texts := make([]string, len(batch))
 		for i, t := range batch {
-			texts[i] = t.text
+			texts[i] = t.payload()
 		}
 		results, err := trans.TranslateBatch(ctx, texts, from, to)
 		if err == nil && len(results) != len(texts) {
@@ -247,7 +263,7 @@ func translateBatch(ctx context.Context, trans core.Translator, batch []*unit) (
 	}
 	results := make([]string, len(batch))
 	for i, t := range batch {
-		r, err := trans.Translate(ctx, t.text, t.fromLang, t.toLang)
+		r, err := trans.Translate(ctx, t.payload(), t.fromLang, t.toLang)
 		if err != nil {
 			return nil, err
 		}

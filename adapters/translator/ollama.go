@@ -47,7 +47,9 @@ func (t *OllamaTranslator) Translate(ctx context.Context, text, from, to string)
 			"2. Maintain the tone and style of the original comment.\n"+
 			"3. Output ONLY the translated text, no explanations or quotes.\n"+
 			"4. If the text is already in the target language, return it as is.\n"+
-			"5. Preserve all line breaks and formatting.\n\n"+
+			"5. Preserve all line breaks and formatting.\n"+
+			"6. Tokens like ⟦0⟧, ⟦1⟧ are placeholders for protected code, tags and references. Keep every placeholder exactly as written, the same number of times and in the same order; never translate, remove, add or reorder them.\n"+
+			"7. Preserve the Markdown structure (lists, emphasis, inline code, code fences).\n\n"+
 			"Original: %s",
 		from, to, text,
 	)
