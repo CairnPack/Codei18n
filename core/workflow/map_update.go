@@ -32,6 +32,8 @@ type MapUpdateOptions struct {
 type MapUpdateResult struct {
 	TotalComments int
 	AddedCount    int
+	// MigratedCount 是新增条目中，从旧 ID（合并前的逐行 ID，或符号规则变化前的 ID）迁移了译文的条数。
+	MigratedCount int
 	Files         int
 	StorePath     string
 	IndexPath     string
@@ -83,6 +85,8 @@ func UpdateMappings(ctx context.Context, env *Env, opts MapUpdateOptions) (*MapU
 	idx.SourceLanguage = cfg.SourceLanguage.Value
 	idx.LocalLanguage = cfg.LocalLanguage.Value
 
+	mig := newMigrator(store, scan.Comments())
+
 	result := &MapUpdateResult{
 		StorePath:  env.MappingsPath(),
 		IndexPath:  env.IndexPath(),
@@ -104,6 +108,9 @@ func UpdateMappings(ctx context.Context, env *Env, opts MapUpdateOptions) (*MapU
 			lang := resolveLang(c, detector, overrides)
 			key := StorageKey(cfg, lang.Lang)
 			if !store.Has(c.ID) {
+				if mig.migrate(c) {
+					result.MigratedCount++
+				}
 				store.Set(c.ID, key, c.SourceText)
 				result.AddedCount++
 				if key != cfg.SourceLanguage.Value {
