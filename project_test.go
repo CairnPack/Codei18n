@@ -230,9 +230,9 @@ func TestTranslateCancelStopsWithinOneBatchAndPersists(t *testing.T) {
 		done <- out{res, err}
 	}()
 
-	<-bt.started            // 第 1 批开始
+	<-bt.started             // 第 1 批开始
 	bt.release <- struct{}{} // 第 1 批完成
-	<-bt.started            // 第 2 批开始（进行中）
+	<-bt.started             // 第 2 批开始（进行中）
 	cancel()
 
 	var o out

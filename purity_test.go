@@ -15,9 +15,9 @@ import (
 // spinner 与彩色输出只允许出现在 cmd/。
 func TestLibraryCodeDoesNotPrintOrExit(t *testing.T) {
 	forbiddenImports := map[string]bool{
-		"github.com/briandowns/spinner":                true,
-		"github.com/fatih/color":                       true,
-		"github.com/spf13/viper":                       true,
+		"github.com/briandowns/spinner":              true,
+		"github.com/fatih/color":                     true,
+		"github.com/spf13/viper":                     true,
 		"github.com/CairnPack/codei18n/internal/log": true,
 		"log": true,
 	}

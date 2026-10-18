@@ -61,9 +61,15 @@ type redactingLogger struct {
 	redact func(string) string
 }
 
-func (l redactingLogger) Debugf(f string, a ...any) { l.inner.Debugf("%s", l.redact(fmt.Sprintf(f, a...))) }
-func (l redactingLogger) Infof(f string, a ...any)  { l.inner.Infof("%s", l.redact(fmt.Sprintf(f, a...))) }
-func (l redactingLogger) Warnf(f string, a ...any)  { l.inner.Warnf("%s", l.redact(fmt.Sprintf(f, a...))) }
+func (l redactingLogger) Debugf(f string, a ...any) {
+	l.inner.Debugf("%s", l.redact(fmt.Sprintf(f, a...)))
+}
+func (l redactingLogger) Infof(f string, a ...any) {
+	l.inner.Infof("%s", l.redact(fmt.Sprintf(f, a...)))
+}
+func (l redactingLogger) Warnf(f string, a ...any) {
+	l.inner.Warnf("%s", l.redact(fmt.Sprintf(f, a...)))
+}
 
 // redactingTranslator 对翻译后端返回的错误脱敏（后端错误可能回显 Authorization 头或 key 片段）。
 type redactingTranslator struct {
@@ -71,7 +77,10 @@ type redactingTranslator struct {
 	redact func(string) string
 }
 
-type redactedError struct{ msg string; cause error }
+type redactedError struct {
+	msg   string
+	cause error
+}
 
 func (e *redactedError) Error() string { return e.msg }
 

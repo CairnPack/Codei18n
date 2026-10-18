@@ -11,11 +11,25 @@ linters:
     - unused
   disable:
     - errcheck
+  exclusions:
+    paths:
+      # lingua-go 的裁剪副本，保持与上游一致，不按本仓库规则改动
+      - third_party
+    rules:
+      # 旧 API（config.Config、workflow.MapUpdate 等）已标记弃用，但兼容层和测试旧行为的用例必须继续调用它们；
+      # 只放行本模块自己的弃用 API，且只限这些文件，新代码误用仍会报错
+      - path: (_test\.go|core/workflow/legacy\.go|tasks\.go)$
+        linters:
+          - staticcheck
+        text: "SA1019: github.com/CairnPack/codei18n/"
 
 formatters:
   enable:
     - gofmt
     - goimports
+  exclusions:
+    paths:
+      - third_party
 
 issues:
   max-issues-per-linter: 0
