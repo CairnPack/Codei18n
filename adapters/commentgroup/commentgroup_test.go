@@ -43,18 +43,18 @@ func TestMergeConsecutiveOwnLineComments(t *testing.T) {
 
 func TestDoNotMergeAcrossMarkersBlankLinesColumnsOrTrailing(t *testing.T) {
 	cases := map[string]int{
-		"// a\n/// b\n":            2, // 标记不同
-		"/// a\n//! b\n":           2,
-		"// a\n\n// b\n":           2, // 空行
-		"// a\n  // b\n":           2, // 起始列不同
-		"x(); // a\n// b\n":        2, // 行尾注释不合并
-		"// a\ny(); // b\n":        2,
-		"/* a */\n/* b */\n":       2, // 块注释不合并
-		"// a\n// b\n/* c */\n":    2,
-		"    // a\n    // b\n":     1,
-		"/// a\n/// b\n/// c\n":    1,
-		"//// sep\n//// sep2\n":    1,
-		"// a\n//// b\n":           2,
+		"// a\n/// b\n":         2, // 标记不同
+		"/// a\n//! b\n":        2,
+		"// a\n\n// b\n":        2, // 空行
+		"// a\n  // b\n":        2, // 起始列不同
+		"x(); // a\n// b\n":     2, // 行尾注释不合并
+		"// a\ny(); // b\n":     2,
+		"/* a */\n/* b */\n":    2, // 块注释不合并
+		"// a\n// b\n/* c */\n": 2,
+		"    // a\n    // b\n":  1,
+		"/// a\n/// b\n/// c\n": 1,
+		"//// sep\n//// sep2\n": 1,
+		"// a\n//// b\n":        2,
 	}
 	for src, want := range cases {
 		if got := Build([]byte(src), "f", raws(src), rust); len(got) != want {

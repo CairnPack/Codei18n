@@ -2,11 +2,11 @@ package workflow
 
 import (
 	"context"
-	"time"
 	"errors"
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/CairnPack/codei18n/core"
 	"github.com/CairnPack/codei18n/core/events"
@@ -209,7 +209,6 @@ dispatch:
 	env.Progress.Emit(events.Event{Phase: events.PhaseDone, Done: len(tasks), Total: len(tasks)})
 	return res, nil
 }
-
 
 // PendingCount 返回需要翻译的条目数（与 TranslateMissing 的任务数一致）。idx 可以为 nil（按旧规则判断）。
 func PendingCount(store *mapping.Store, source, local string, idx ...*index.Index) int {

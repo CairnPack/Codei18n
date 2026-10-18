@@ -124,7 +124,7 @@ func UpdateMappings(ctx context.Context, env *Env, opts MapUpdateOptions) (*MapU
 		state.Detector == detectorKey(detector) &&
 		state.Source == cfg.SourceLanguage.Value && state.Local == cfg.LocalLanguage.Value &&
 		state.Mappings == statOf(env.MappingsPath()) && state.Index == statOf(env.IndexPath()) &&
-		state.Overrides == statOf(env.OverridesPath()) && !(opts.Prune && state.Orphans > 0) {
+		state.Overrides == statOf(env.OverridesPath()) && (!opts.Prune || state.Orphans <= 0) {
 		result.TotalComments, result.Unchanged = state.Total, true
 		if wholeRoot {
 			result.Orphans = state.Orphans
