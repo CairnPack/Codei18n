@@ -68,6 +68,9 @@ type TokenStatus struct {
 	GlobalAccount  string `json:"globalAccount"`
 	GlobalSaved    bool   `json:"globalSaved"`
 	GlobalLast4    string `json:"globalLast4,omitempty"`
+	// GlobalBlocked 表示项目配置把 baseUrl / endpoint 改成了与全局配置不同的地址，因此不使用全局令牌，
+	// 防止随仓库分发的配置把用户的令牌发往不受信任的主机。
+	GlobalBlocked bool `json:"globalBlocked,omitempty"`
 
 	Plaintext []PlaintextToken `json:"plaintext,omitempty"`
 	// StoreError 是凭据库不可用时的错误（例如非 Windows 平台）。
@@ -141,9 +144,12 @@ func (p *Project) resolveToken(cfg *config.Effective) (Secret, *TokenStatus, err
 			st.StoreError = err.Error()
 		}
 	}
+	st.GlobalBlocked = !cfg.EndpointTrusted()
 	if s, err := store.Get(st.GlobalAccount); err == nil {
 		st.GlobalSaved, st.GlobalLast4 = true, s.Last4()
-		use(s, TokenSourceGlobal)
+		if !st.GlobalBlocked {
+			use(s, TokenSourceGlobal)
+		}
 	} else if !errors.Is(err, secrets.ErrNotFound) && st.StoreError == "" {
 		st.StoreError = err.Error()
 	}
@@ -158,6 +164,15 @@ func (p *Project) resolveToken(cfg *config.Effective) (Secret, *TokenStatus, err
 			logging.OrNop(p.s.logger).Warnf("配置文件 %s 中的 %s 是明文令牌，已照常使用；请运行 codei18n auth migrate 迁移到系统凭据库", pt.info.Path, pt.info.Location)
 			use(secrets.NewSecret([]byte(pt.value)), TokenSourceFile)
 		}
+	}
+	if found.IsZero() && st.GlobalBlocked && st.GlobalSaved {
+		addr := cfg.Provider.BaseURL.Value
+		if addr == "" {
+			addr = cfg.Provider.Endpoint.Value
+		}
+		return Secret{}, st, fmt.Errorf("%w：项目配置把翻译地址改成了 %q（与全局配置不同）。为防止令牌被发往不受信任的地址，"+
+			"不会使用全局令牌。请为本项目保存专用令牌（codei18n auth set --project --profile %s），或把该地址写入全局配置的 profile",
+			ErrNoToken, addr, profile)
 	}
 	if found.IsZero() {
 		return Secret{}, st, fmt.Errorf("%w（profile %q）。请任选一种方式设置：\n"+

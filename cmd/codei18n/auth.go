@@ -30,7 +30,7 @@ var authCmd = &cobra.Command{
 var authSetCmd = &cobra.Command{
 	Use:   "set",
 	Short: "保存令牌（从标准输入或隐藏输入读取，不接受命令行参数）",
-	Args:  cobra.NoArgs,
+	Args:  rejectArgsQuietly,
 	Run:   func(cmd *cobra.Command, args []string) { runAuthSet() },
 }
 
@@ -64,6 +64,14 @@ func init() {
 	for _, c := range []*cobra.Command{authSetCmd, authDeleteCmd} {
 		c.Flags().BoolVar(&authProject, "project", false, "操作当前项目的覆盖令牌，而不是全局令牌")
 	}
+}
+
+// rejectArgsQuietly 拒绝位置参数且不回显它们：误把令牌当参数传入时，错误信息（可能进入 CI 日志）里不能出现令牌。
+func rejectArgsQuietly(cmd *cobra.Command, args []string) error {
+	if len(args) > 0 {
+		return errors.New("该命令不接受参数；请通过标准输入传入令牌，例如：echo <令牌> | codei18n auth set --profile <名称>")
+	}
+	return nil
 }
 
 func openGlobal() *codei18n.Global {

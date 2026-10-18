@@ -2,6 +2,7 @@ package translator
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -90,7 +91,7 @@ func New(s Settings, key KeySource) (core.Translator, error) {
 			baseURL = "https://api.deepseek.com"
 			log.Infof("自动检测到 DeepSeek 模型，设置 BaseURL 为 %s", baseURL)
 		}
-		log.Debugf("Using LLM: BaseURL=%s, Model=%s", baseURL, model)
+		log.Debugf("Using LLM: BaseURL=%s, Model=%s", redactURL(baseURL), model)
 		t := NewLLMTranslator(apiKey, baseURL, model)
 		t.log = log
 		return t, nil
@@ -103,11 +104,21 @@ func New(s Settings, key KeySource) (core.Translator, error) {
 		if model == "" {
 			model = config.DefaultOllamaModel
 		}
-		log.Debugf("Using Ollama: Endpoint=%s, Model=%s", endpoint, model)
+		log.Debugf("Using Ollama: Endpoint=%s, Model=%s", redactURL(endpoint), model)
 		return NewOllamaTranslator(endpoint, model), nil
 	default:
 		return nil, fmt.Errorf("不支持的翻译提供商: %s", provider)
 	}
+}
+
+// redactURL 抹去 URL 中内嵌的用户名与密码（https://user:pass@host）。
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	u.User = nil
+	return u.String()
 }
 
 // EnvKey 从环境变量 OPENAI_API_KEY 读取令牌。

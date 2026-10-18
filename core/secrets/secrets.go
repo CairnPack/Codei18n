@@ -95,7 +95,7 @@ func (s *Memory) Set(account string, secret Secret) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.m[account] = append([]byte(nil), secret.b...)
+	s.m[account] = append([]byte(nil), secret.bytes()...)
 	return nil
 }
 

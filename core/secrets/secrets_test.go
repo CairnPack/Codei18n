@@ -1,9 +1,11 @@
 package secrets
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -78,5 +80,36 @@ func TestNaming(t *testing.T) {
 	}
 	if TargetName(ProjectAccount("u-1", "ds")) != "codei18n/project/u-1/ds" {
 		t.Fatal()
+	}
+}
+
+// 审计 F2：编码后的回显、中间片段、JSON 转义、短令牌都要抹去。
+func TestRedactEncodedAndPartialEchoes(t *testing.T) {
+	tok := "AbCdEfGh/IjKlMnOp+QrStUvWx/YzAbCdEf=="
+	s := NewSecret([]byte(tok))
+	cases := map[string]string{
+		"url":    "invalid credential " + url.QueryEscape(tok),
+		"middle": "got " + tok[1:len(tok)-1],
+		"base64": "header " + base64.StdEncoding.EncodeToString([]byte(tok)),
+	}
+	for name, msg := range cases {
+		out := s.Redact(msg)
+		for i := 0; i+8 <= len(tok); i++ {
+			if strings.Contains(out, tok[i:i+8]) {
+				t.Fatalf("%s: 片段 %q 未抹去: %s", name, tok[i:i+8], out)
+			}
+		}
+		if strings.Contains(out, url.QueryEscape(tok)[10:20]) {
+			t.Fatalf("%s: 编码片段未抹去: %s", name, out)
+		}
+	}
+	js := NewSecret([]byte("ABCDEFGH&IJKLMNOP<QRSTUVWX"))
+	enc, _ := json.Marshal(js.Reveal())
+	if out := js.Redact(string(enc)); strings.Contains(out, "IJKLMNOP") || strings.Contains(out, "ABCDEFGH") {
+		t.Fatalf("JSON 转义形式未抹去: %s", out)
+	}
+	short := NewSecret([]byte("abc"))
+	if out := short.Redact("key=abc!"); strings.Contains(out, "abc") {
+		t.Fatalf("短令牌精确匹配应抹去: %s", out)
 	}
 }
