@@ -39,19 +39,16 @@ func TestRustSupport(t *testing.T) {
 	assert.True(t, strings.HasSuffix(result.File, "lib.rs"))
 	assert.NotEmpty(t, result.Comments)
 
-	// Expect 11 comments without merging:
-	// 1. Inner doc (line 1)
-	// 2. Inner doc (line 2)
-	// 3. Inner doc (line 4)
-	// 4. Outer doc (line 6)
-	// 5. Line comment (line 8)
-	// 6. Block comment (lines 9-10)
-	// 7. Line comment (line 11)
-	// 8. Line comment (line 12)
-	// 9. Doc comment (line 15)
-	// 10. Doc comment (line 17) - line 16 is empty and filtered
-	// 11. Doc comment (line 18)
-	assert.Equal(t, 11, len(result.Comments), "Should have exactly 11 comments without merging")
+	// 按 docs/index-format.md §6.1 的连续行注释合并规则（标记相同、行相邻、起始列相同、独占一行的
+	// 行注释合并为一条），原来逐行的 11 条记录变为 7 条：
+	// 1. Inner doc（第 1-2 行，2 条 //! 合并）
+	// 2. Inner doc（第 4 行）
+	// 3. Outer doc（第 6 行）
+	// 4. Line comment（第 8 行）
+	// 5. Block comment（第 9-10 行，块注释不合并）
+	// 6. Line comment（第 11-12 行，2 条 // 合并）
+	// 7. Doc comment（第 15-18 行，4 条 /// 合并，第 16 行的空 /// 作为段落分隔留在组内）
+	assert.Equal(t, 7, len(result.Comments), "连续行注释合并后应为 7 条")
 
 	// Verify Language and Types
 	foundInnerDoc := false
@@ -94,25 +91,16 @@ func TestRustSupport(t *testing.T) {
 		endLine := int(rng["endLine"].(float64))
 
 		assert.Equal(t, 1, startLine, "First comment should start on line 1")
-		assert.Equal(t, 1, endLine, "First comment should end on line 1 (no merging)")
+		// 合并规则：第 1、2 行的 //! 合并为一条，因此结束于第 2 行
+		assert.Equal(t, 2, endLine, "第 1-2 行的 //! 应合并为一条，结束于第 2 行")
 	}
 
-	// Verify the last doc comments (lines 15, 17, 18)
-	// We expect them to be separate but have the same symbol
-	if len(result.Comments) >= 11 {
-		// Line 15
-		c9 := result.Comments[8]
-		assert.Equal(t, "PrecompileContract", c9["symbol"])
-		assert.Contains(t, c9["sourceText"].(string), "A mapping of precompile contracts")
-
-		// Line 17
-		c10 := result.Comments[9]
-		assert.Equal(t, "PrecompileContract", c10["symbol"])
-		assert.Contains(t, c10["sourceText"].(string), "This is an optimization")
-
-		// Line 18
-		c11 := result.Comments[10]
-		assert.Equal(t, "PrecompileContract", c11["symbol"])
-		assert.Contains(t, c11["sourceText"].(string), "dynamic representation")
+	// 第 15-18 行的 /// 按合并规则成为一条记录，符号仍为 PrecompileContract
+	if len(result.Comments) >= 7 {
+		c7 := result.Comments[6]
+		assert.Equal(t, "PrecompileContract", c7["symbol"])
+		assert.Contains(t, c7["sourceText"].(string), "A mapping of precompile contracts")
+		assert.Contains(t, c7["sourceText"].(string), "This is an optimization")
+		assert.Contains(t, c7["sourceText"].(string), "dynamic representation")
 	}
 }
