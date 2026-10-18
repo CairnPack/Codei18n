@@ -44,5 +44,5 @@
    （拉丁/西里尔等语言复制 unigrams ~ quadrigrams 四个 `.pb.bin.zip`；如需更高精度可同时复制 fivegrams）。
 2. 运行 `go test ./third_party/lingua/`，并更新 `codei18n_test.go` 中 `TestAvailableLanguages` 的期望。
 3. 在 `core/langdetect/detect.go` 的 `supportedCodes`、`codeToLingua`、`linguaToCode`
-   （拉丁字母语言还要加入 `latinLanguages`）中登记语言码，补充测试样本。
+   中登记语言码，补充测试样本。
 4. 重新测量二进制体积并更新本文档。每种拉丁语言约增加 0.8~1.2 MB。
