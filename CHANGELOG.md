@@ -7,6 +7,8 @@
 
 ## [未发布]
 
+## [0.2.0] - 2026-10-18
+
 ### 破坏性变更
 - 模块路径改为 `github.com/CairnPack/codei18n`，Go 升级到 1.27.1，移除 viper 依赖
 - 构建需要 `CGO_ENABLED=1`（tree-sitter）；Windows 上需要 MinGW gcc
@@ -70,5 +72,6 @@
 - `convert` 命令：转换注释语言
 - `hook` 命令：管理 Git Hooks
 
-[未发布]: https://github.com/studyzy/codei18n/compare/v0.1.0...HEAD
+[未发布]: https://github.com/CairnPack/Codei18n/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/CairnPack/Codei18n/releases/tag/v0.2.0
 [0.1.0]: https://github.com/studyzy/codei18n/releases/tag/v0.1.0
