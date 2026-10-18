@@ -3,7 +3,7 @@ package translator
 import (
 	"testing"
 
-	"github.com/studyzy/codei18n/core/config"
+	"github.com/CairnPack/codei18n/core/config"
 )
 
 // Verification history providers (google/deepl) will be explicitly rejected with migration path instructions.

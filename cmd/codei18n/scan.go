@@ -8,12 +8,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/studyzy/codei18n/core/config"
-	"github.com/studyzy/codei18n/core/domain"
-	"github.com/studyzy/codei18n/core/mapping"
-	"github.com/studyzy/codei18n/core/scanner"
-	"github.com/studyzy/codei18n/core/utils"
-	"github.com/studyzy/codei18n/internal/log"
+	"github.com/CairnPack/codei18n"
+	"github.com/CairnPack/codei18n/core/config"
+	"github.com/CairnPack/codei18n/core/domain"
+	"github.com/CairnPack/codei18n/core/mapping"
+	"github.com/CairnPack/codei18n/core/scanner"
+	"github.com/CairnPack/codei18n/core/utils"
+	"github.com/CairnPack/codei18n/internal/log"
 )
 
 var (
@@ -64,13 +65,14 @@ func runScan() {
 	} else if scanFile != "" {
 		comments, err = scanner.SingleFile(scanFile)
 	} else {
-		// Try to load config for excludePatterns
-		cfg, _ := config.LoadConfig()
-		var excludes []string
-		if cfg != nil {
-			excludes = cfg.ExcludePatterns
+		p := openProject(config.Overrides{})
+		ctx, cancel := signalContext()
+		defer cancel()
+		var res *scanner.Result
+		res, err = p.Scan(ctx, codei18n.ScanOptions{Dir: scanDir})
+		if res != nil {
+			comments = res.Comments()
 		}
-		comments, err = scanner.Directory(scanDir, excludes...)
 	}
 
 	if err != nil {
@@ -86,23 +88,18 @@ func runScan() {
 
 	// Load mapping if requested
 	if scanWithTranslations {
-		// Load config
-		cfg, err := config.LoadConfig()
-		if err != nil {
-			log.Warn("无法加载配置，使用默认值: %v", err)
-			cfg = config.DefaultConfig()
-		}
+		p := openProject(config.Overrides{})
+		cfg := effectiveConfig(p)
 
 		// Load store
-		storePath := filepath.Join(".codei18n", "mappings.json")
-		store := mapping.NewStore(storePath)
+		store := mapping.NewStore(filepath.Join(p.DataDir(), mapping.FileName))
 		// We ignore error here, if file doesn't exist, we just don't show translations
 		// or better: log.Warn
 		if err := store.Load(); err != nil {
 			log.Warn("加载映射文件失败: %v", err)
 		} else {
 			// Populate LocalizedText
-			targetLang := cfg.LocalLanguage // Default target
+			targetLang := cfg.LocalLanguage.Value // Default target
 			if scanLang != "" {
 				targetLang = scanLang
 			}

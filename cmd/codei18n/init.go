@@ -1,14 +1,13 @@
 package main
 
 import (
-	"os"
-	"strings"
+	"errors"
 
 	"github.com/spf13/cobra"
 
-	"github.com/studyzy/codei18n/core/config"
-	"github.com/studyzy/codei18n/core/workflow"
-	"github.com/studyzy/codei18n/internal/log"
+	"github.com/CairnPack/codei18n"
+	"github.com/CairnPack/codei18n/core/config"
+	"github.com/CairnPack/codei18n/internal/log"
 )
 
 var (
@@ -39,23 +38,12 @@ func init() {
 }
 
 func runInit(cmd *cobra.Command) {
-	// 1. Load effective config (Global + Defaults)
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		log.Warn("无法加载配置，使用默认值: %v", err)
-		cfg = config.DefaultConfig()
-	}
+	p := openProject(config.Overrides{})
 
-	// 2. Apply flags
-	// Note: Flags defined in init() act as overrides or defaults.
-	// Cobra flags don't automatically populate cfg, we map them here.
-	// But we need to distinguish between "default value" and "user provided value".
-	// Since we set default values in flags, we might overwrite global config if we are not careful.
-	// Actually, `initSourceLang` defaults to "en". If global config has "fr", `initSourceLang` will still be "en" if user didn't provide it?
-	// No, cobra flags have default values.
-	// We should only override if user EXPLICITLY provided the flag.
-	// How to check if flag was changed? cmd.Flags().Changed("source-lang")
+	// 1. 合并全局与默认配置，作为项目配置的快照（旧版 init 行为）
+	cfg := effectiveConfig(p).Legacy()
 
+	// 2. 只有用户显式传入的 flag 才覆盖
 	if cmd.Flags().Changed("source-lang") {
 		cfg.SourceLanguage = initSourceLang
 	}
@@ -66,39 +54,46 @@ func runInit(cmd *cobra.Command) {
 		cfg.TranslationProvider = initProvider
 	}
 
-	// 3. Sanitize (Strip secrets inherited from global)
-	// We create a new sanitized config object to save locally
-	projectCfg := cfg.Sanitize()
-
-	// 4. Save Config
-	if _, err := os.Stat(".codei18n/config.json"); err == nil && !initForce {
-		log.Fatal("配置文件已存在 (使用 --force 覆盖)")
-	}
-
-	if err := config.SaveConfig(projectCfg); err != nil {
+	// 3. 写入项目配置（去掉从全局继承的敏感字段，生成 projectId）
+	if err := p.Init(codei18n.InitOptions{Snapshot: cfg, Force: initForce}); err != nil {
+		if errors.Is(err, codei18n.ErrAlreadyInitialized) {
+			log.Fatal("配置文件已存在 (使用 --force 覆盖)")
+		}
 		log.Fatal("保存配置失败: %v", err)
 	}
 	log.Success("项目配置文件已生成")
 
-	// 5. Git Integration
-	setupGitIntegration()
+	// 4. Git 集成
+	if p.IsGitRepo() {
+		if changed, err := p.EnsureGitignore(); err != nil {
+			log.Warn("更新 .gitignore 失败: %v", err)
+		} else if changed {
+			log.Success("已将 .codei18n/ 添加到 .gitignore")
+		}
+		if err := p.InstallHooks(); err != nil {
+			log.Warn("安装 Git Hook 失败: %v", err)
+		} else {
+			log.Success("Git Pre-commit Hook 已自动安装")
+			log.Success("Git Commit-msg Hook 已自动安装")
+		}
+	}
 
-	// 6. Map Update (Auto Scan)
+	ctx, cancel := signalContext()
+	defer cancel()
+
+	// 5. 初次扫描
 	log.Info("正在初始化注释映射...")
-	mapResult, err := workflow.MapUpdate(projectCfg, ".", false)
+	mapResult, err := p.UpdateMappings(ctx, codei18n.MapOptions{})
 	if err != nil {
 		log.Warn("映射初始化失败: %v", err)
 	} else {
 		log.Success("已扫描 %d 条注释，生成初始映射", mapResult.TotalComments)
 	}
 
-	// 7. Conditional Translation
+	// 6. 可选的初次翻译
 	if initWithTranslate {
 		log.Info("正在执行初次翻译...")
-		transResult, err := workflow.Translate(projectCfg, workflow.TranslateOptions{
-			Concurrency: 5,
-			// Use provider/model from config unless overridden (which we handled in step 2)
-		})
+		transResult, err := runTranslateWithSpinner(ctx, p, codei18n.TranslateOptions{Concurrency: 5})
 		if err != nil {
 			log.Warn("翻译失败: %v", err)
 		} else {
@@ -109,41 +104,4 @@ func runInit(cmd *cobra.Command) {
 	}
 
 	log.Success("项目初始化完成！")
-}
-
-func setupGitIntegration() {
-	if _, err := os.Stat(".git"); os.IsNotExist(err) {
-		return // Not a git repo
-	}
-
-	// 1. Update .gitignore
-	gitignorePath := ".gitignore"
-	content, _ := os.ReadFile(gitignorePath) // ignore error, treat as empty if missing
-	sContent := string(content)
-	if !strings.Contains(sContent, ".codei18n/") {
-		f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			log.Warn("更新 .gitignore 失败: %v", err)
-		} else {
-			if len(content) > 0 && !strings.HasSuffix(sContent, "\n") {
-				f.WriteString("\n")
-			}
-			f.WriteString(".codei18n/\n")
-			f.Close()
-			log.Success("已将 .codei18n/ 添加到 .gitignore")
-		}
-	}
-
-	// 2. Install hook
-	// Assuming installHook is available in package main (from hook.go)
-	if err := installPreCommitHook(); err != nil {
-		log.Warn("安装 pre-commit hook 失败: %v", err)
-	} else {
-		log.Success("Git Pre-commit Hook 已自动安装")
-	}
-	if err := installCommitMsgHook(); err != nil {
-		log.Warn("安装 commit-msg hook 失败: %v", err)
-	} else {
-		log.Success("Git Commit-msg Hook 已自动安装")
-	}
 }

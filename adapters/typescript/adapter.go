@@ -11,7 +11,7 @@ import (
 	"github.com/smacker/go-tree-sitter/typescript/tsx"
 	"github.com/smacker/go-tree-sitter/typescript/typescript"
 
-	"github.com/studyzy/codei18n/core/domain"
+	"github.com/CairnPack/codei18n/core/domain"
 )
 
 type Adapter struct{}
@@ -106,7 +106,7 @@ func (a *Adapter) extractComments(root *sitter.Node, src []byte, file string, la
 			// core/utils/id.go usually has ID generation. Let's assume we can use it or replicate it.
 			// Let's use the core/domain one if available or utils.
 			// Wait, core/utils/id.go was mentioned in exploration.
-			// We need to import "github.com/studyzy/codei18n/core/utils" if it's public.
+			// We need to import "github.com/CairnPack/codei18n/core/utils" if it's public.
 			// Let's check imports.
 
 			// For now, let's just create the object, ID will be handled by caller or we need to add utils.

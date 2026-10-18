@@ -8,9 +8,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/studyzy/codei18n/adapters"
-	"github.com/studyzy/codei18n/core/mapping"
-	"github.com/studyzy/codei18n/core/utils"
+	"github.com/CairnPack/codei18n/adapters"
+	"github.com/CairnPack/codei18n/core/mapping"
+	"github.com/CairnPack/codei18n/core/utils"
 )
 
 func TestJavaConvert_ApplyMode(t *testing.T) {

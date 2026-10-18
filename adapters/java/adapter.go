@@ -8,7 +8,7 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/java"
 
-	"github.com/studyzy/codei18n/core/domain"
+	"github.com/CairnPack/codei18n/core/domain"
 )
 
 // Adapter implements the LanguageAdapter interface in Java.

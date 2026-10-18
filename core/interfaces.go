@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	"github.com/studyzy/codei18n/core/domain"
+	"github.com/CairnPack/codei18n/core/domain"
 )
 
 // LanguageAdapter defines the interface for language-specific AST parsers

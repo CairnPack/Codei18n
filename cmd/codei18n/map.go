@@ -3,14 +3,14 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
-	"github.com/studyzy/codei18n/core/config"
-	"github.com/studyzy/codei18n/core/mapping"
-	"github.com/studyzy/codei18n/core/workflow"
-	"github.com/studyzy/codei18n/internal/log"
+	"github.com/CairnPack/codei18n"
+	"github.com/CairnPack/codei18n/core/config"
+	"github.com/CairnPack/codei18n/core/langcode"
+	"github.com/CairnPack/codei18n/core/mapping"
+	"github.com/CairnPack/codei18n/internal/log"
 )
 
 var (
@@ -30,7 +30,7 @@ var mapCmd = &cobra.Command{
 var mapUpdateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "更新映射文件",
-	Long:  `扫描项目中的注释，并将新发现的注释添加到映射文件中。`,
+	Long:  `扫描项目中的注释，并将新发现的注释添加到映射文件中，同时写出位置索引 .codei18n/index.json。`,
 	Run: func(cmd *cobra.Command, args []string) {
 		runMapUpdate()
 	},
@@ -58,14 +58,11 @@ func init() {
 }
 
 func runMapUpdate() {
-	// Load config
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		log.Warn("无法加载配置，使用默认值: %v", err)
-		cfg = config.DefaultConfig()
-	}
+	p := openProject(config.Overrides{})
+	ctx, cancel := signalContext()
+	defer cancel()
 
-	result, err := workflow.MapUpdate(cfg, mapScanDir, mapDryRun)
+	result, err := p.UpdateMappings(ctx, codei18n.MapOptions{ScanDir: mapScanDir, DryRun: mapDryRun})
 	if err != nil {
 		log.Fatal("Map update failed: %v", err)
 	}
@@ -79,26 +76,33 @@ func runMapUpdate() {
 }
 
 func runMapGet(commentID string) {
-	cfg, err := config.LoadConfig()
+	p := openProject(config.Overrides{})
+	cfg, err := p.Config()
 	if err != nil {
-		cfg = config.DefaultConfig()
+		cfg = config.Resolve(nil, nil, config.Overrides{})
 	}
 
 	targetLang := mapLang
 	if targetLang == "" {
-		targetLang = cfg.LocalLanguage
+		targetLang = cfg.LocalLanguage.Value
 	}
 
-	storePath := filepath.Join(".codei18n", "mappings.json")
-	store := mapping.NewStore(storePath)
+	store := mapping.NewStore(p.DataDir() + string(os.PathSeparator) + mapping.FileName)
 	if err := store.Load(); err != nil {
 		log.Fatal("加载映射文件失败: %v", err)
 	}
 
 	if text, ok := store.Get(commentID, targetLang); ok {
 		fmt.Println(text)
-	} else {
-		log.Error("未找到 ID 为 %s 的 %s 翻译", commentID, targetLang)
-		os.Exit(1)
+		return
 	}
+	// 再按等价语言码查找（例如 zh 与 zh-CN）
+	if langs := store.Languages(commentID); langs != nil {
+		if k := langcode.FindKey(langs, targetLang); k != "" {
+			fmt.Println(langs[k])
+			return
+		}
+	}
+	log.Error("未找到 ID 为 %s 的 %s 翻译", commentID, targetLang)
+	os.Exit(1)
 }

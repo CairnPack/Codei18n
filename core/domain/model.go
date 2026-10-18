@@ -44,6 +44,25 @@ type Comment struct {
 
 	// LocalizedText is the translated text (Optional, populated during scan --with-translations)
 	LocalizedText string `json:"localizedText,omitempty"`
+
+	// Parts 表示由几条物理注释合并而来（见 docs/index-format.md §6.1）；0 视为 1。
+	Parts int `json:"parts,omitempty"`
+
+	// IndexRange 是写入 index.json 的坐标（列为 UTF-16 码元），由扫描器填充，不参与 JSON 输出。
+	IndexRange TextRange `json:"-"`
+
+	// PartSymbols 记录合并前各物理注释各自的符号，用于把旧版逐行 ID 的译文迁移到合并后的 ID。
+	PartSymbols []string `json:"-"`
+	// PartTexts 记录合并前各物理注释的原文，与 PartSymbols 一一对应。
+	PartTexts []string `json:"-"`
+}
+
+// PartCount 返回物理注释条数（至少为 1）。
+func (c *Comment) PartCount() int {
+	if c.Parts < 1 {
+		return 1
+	}
+	return c.Parts
 }
 
 // LocalizedComment represents the localized version of a comment

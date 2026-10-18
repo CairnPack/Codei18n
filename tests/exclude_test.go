@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/studyzy/codei18n/core/config"
-	"github.com/studyzy/codei18n/core/workflow"
+	"github.com/CairnPack/codei18n/core/config"
+	"github.com/CairnPack/codei18n/core/workflow"
 )
 
 func TestMapUpdate_RespectsExcludePatterns(t *testing.T) {

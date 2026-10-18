@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"path/filepath"
+	"os/signal"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
+
+	"github.com/CairnPack/codei18n"
+	"github.com/CairnPack/codei18n/core/config"
+	"github.com/CairnPack/codei18n/internal/log"
 )
 
 var (
@@ -32,82 +36,57 @@ func Execute() {
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
-
 	rootCmd.Version = version
 	rootCmd.SetVersionTemplate("CodeI18n CLI 版本: {{.Version}}\n")
 
-	// Global flags
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "配置文件路径 (默认读取 ~/.codei18n/config.json 以及当前目录的 .codei18n/config.json)")
 	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "显示详细日志")
-
-	// Bind flags to viper
-	viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose"))
 }
 
-// initConfig reads in config file and ENV variables if set.
-func initConfig() {
-	viper.AutomaticEnv() // read in environment variables that match
+// cliLogger 把库日志输出到 stderr（带颜色）。Debug 级别只在 --verbose 时输出。
+type cliLogger struct{}
 
-	if cfgFile != "" {
-		viper.SetConfigFile(cfgFile)
-		if err := viper.ReadInConfig(); err != nil {
-			cobra.CheckErr(err)
-		}
-		if verbose {
-			fmt.Fprintf(os.Stderr, "Using config file: %s\n", viper.ConfigFileUsed())
-		}
-		return
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		cobra.CheckErr(err)
-	}
-
-	configLoaded := false
-
-	if loaded, err := loadConfigFile(filepath.Join(home, ".codei18n", "config.json"), false); err != nil {
-		cobra.CheckErr(err)
-	} else if loaded {
-		configLoaded = true
-	}
-
-	if loaded, err := loadConfigFile(filepath.Join(".codei18n", "config.json"), configLoaded); err != nil {
-		cobra.CheckErr(err)
-	} else if loaded {
-		configLoaded = true
-	}
-
-	if !configLoaded && verbose {
-		fmt.Fprintln(os.Stderr, "未找到配置文件，使用内置默认配置")
-	}
-}
-
-func loadConfigFile(path string, merge bool) (bool, error) {
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-
-	viper.SetConfigFile(path)
-
-	var err error
-	if merge {
-		err = viper.MergeInConfig()
-	} else {
-		err = viper.ReadInConfig()
-	}
-	if err != nil {
-		return false, err
-	}
-
+func (cliLogger) Debugf(format string, args ...any) {
 	if verbose {
-		fmt.Fprintf(os.Stderr, "Using config file: %s\n", path)
+		log.Debug(format, args...)
 	}
-	return true, nil
+}
+func (cliLogger) Infof(format string, args ...any) { log.Info(format, args...) }
+func (cliLogger) Warnf(format string, args ...any) { log.Warn(format, args...) }
+
+// openProject 以当前目录为项目根目录打开项目。
+func openProject(ov config.Overrides) *codei18n.Project {
+	codei18n.Version = version
+	opts := []codei18n.Option{codei18n.WithLogger(cliLogger{}), codei18n.WithOverrides(ov)}
+	if cfgFile != "" {
+		if _, err := os.Stat(cfgFile); err != nil {
+			log.Fatal("读取配置文件失败: %v", err)
+		}
+		opts = append(opts, codei18n.WithConfigFile(cfgFile))
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Using config file: %s\n", cfgFile)
+		}
+	}
+	p, err := codei18n.Open(".", opts...)
+	if err != nil {
+		log.Fatal("打开项目失败: %v", err)
+	}
+	return p
+}
+
+// effectiveConfig 读取合并后的配置；失败时警告并退回默认值（与旧版行为一致）。
+func effectiveConfig(p *codei18n.Project) *config.Effective {
+	cfg, err := p.Config()
+	if err != nil {
+		log.Warn("无法加载配置，使用默认值: %v", err)
+		return config.Resolve(nil, nil, config.Overrides{})
+	}
+	return cfg
+}
+
+// signalContext 返回在 Ctrl+C 时取消的 context。
+func signalContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt)
 }
 
 func main() {

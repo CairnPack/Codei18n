@@ -6,7 +6,7 @@ import (
 	"go/token"
 	"strings"
 
-	"github.com/studyzy/codei18n/core/domain"
+	"github.com/CairnPack/codei18n/core/domain"
 )
 
 // Adapter implements core.LanguageAdapter for Go

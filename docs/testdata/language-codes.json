@@ -1,0 +1,18 @@
+{
+  "description": "语言码规范化与等价测试向量。core/langcode 与 IDEA 插件 LanguageCodes 共用，修改时两边同步。",
+  "canonical": [
+    ["en", "en"], ["EN", "en"], ["en-US", "en"], ["en_GB", "en"], ["eng", "en"],
+    ["zh", "zh-Hans"], ["zh-CN", "zh-Hans"], ["zh_cn", "zh-Hans"], ["zh-SG", "zh-Hans"], ["zh-Hans", "zh-Hans"],
+    ["zh-hans-cn", "zh-Hans"], ["cmn", "zh-Hans"], ["zho", "zh-Hans"], ["chi", "zh-Hans"],
+    ["zh-TW", "zh-Hant"], ["zh-HK", "zh-Hant"], ["zh-MO", "zh-Hant"], ["zh-Hant", "zh-Hant"], ["zh-hant-tw", "zh-Hant"],
+    ["ja", "ja"], ["ja-JP", "ja"], ["jpn", "ja"], ["ko-KR", "ko"], ["kor", "ko"],
+    ["de-DE", "de"], ["ger", "de"], ["deu", "de"], ["fr-CA", "fr"], ["fre", "fr"], ["fra", "fr"],
+    ["es-419", "es"], ["spa", "es"], ["ru-RU", "ru"], ["rus", "ru"], ["pt-BR", "pt"],
+    ["iw", "he"], ["in", "id"], ["ji", "yi"],
+    [" en ", "en"], ["", ""], ["und", "unknown"], ["unknown", "unknown"], ["UNKNOWN", "unknown"]
+  ],
+  "equivalent": [
+    ["zh", "zh-CN", true], ["zh-CN", "zh-Hans", true], ["zh-TW", "zh-Hant", true], ["zh-CN", "zh-TW", false],
+    ["en", "en-US", true], ["en", "zh", false], ["", "", false], ["", "en", false], ["unknown", "unknown", true]
+  ]
+}
