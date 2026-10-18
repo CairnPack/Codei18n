@@ -103,8 +103,14 @@ func (p *Project) Scan(ctx context.Context, opts ScanOptions) (*ScanResult, erro
 // MapOptions 配置映射更新。
 type MapOptions struct {
 	// ScanDir 为空时扫描项目根目录。
-	ScanDir  string
-	DryRun   bool
+	ScanDir string
+	DryRun  bool
+	// Prune 删除源码中已不存在的条目（孤儿）。只能在扫描整个项目根目录时使用；默认只在结果中报告数量。
+	Prune bool
+	// NoCache 禁用增量扫描缓存。
+	NoCache bool
+	// Workers 并行解析的 worker 数，<=0 时为 CPU 核数。
+	Workers  int
 	Progress ProgressFunc
 }
 
@@ -118,7 +124,9 @@ func (p *Project) UpdateMappings(ctx context.Context, opts MapOptions) (*MapUpda
 	if err != nil {
 		return nil, err
 	}
-	return workflow.UpdateMappings(ctx, env, workflow.MapUpdateOptions{ScanDir: opts.ScanDir, DryRun: opts.DryRun})
+	return workflow.UpdateMappings(ctx, env, workflow.MapUpdateOptions{
+		ScanDir: opts.ScanDir, DryRun: opts.DryRun, Prune: opts.Prune, NoCache: opts.NoCache, Workers: opts.Workers,
+	})
 }
 
 // TranslateOptions 配置翻译。

@@ -53,12 +53,15 @@ func (p *Project) Status() (*Status, error) {
 			st.Translated++
 		}
 	}
-	st.Pending = workflow.PendingCount(store, env.Config.SourceLanguage.Value, local)
+	idx, err := index.Read(env.IndexPath())
+	if err != nil {
+		idx = nil
+	}
+	st.Pending = workflow.PendingCount(store, env.Config.SourceLanguage.Value, local, idx)
 	if failures, err := workflow.LoadFailures(env); err == nil {
 		st.Failed = len(failures)
 	}
-	idx, err := index.Read(env.IndexPath())
-	if err == nil && idx != nil {
+	if idx != nil {
 		st.HasIndex = true
 		st.IndexGeneratedAt = idx.GeneratedAt
 		for _, f := range idx.Files {

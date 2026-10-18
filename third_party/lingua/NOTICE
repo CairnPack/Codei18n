@@ -1,0 +1,15 @@
+Lingua for Go（裁剪版）
+Copyright © 2021-present Peter M. Stahl pemistahl@gmail.com
+
+本目录是 github.com/pemistahl/lingua-go v1.4.0
+（提交 320c87b00cfb62b6f6cee032f43caa9610b1d18b）的修改副本，
+依 Apache License 2.0 授权，许可证全文见同目录 LICENSE。
+
+CodeI18n 所做的修改（详见 README.md 与各文件头部的修改说明）：
+  - 删除除 en、zh、ja、ko、de、fr、es、ru 以外全部语言的模型文件，并删除这些语言的 fivegram 模型；
+  - 删除训练/写出模型的代码（writer.go、model.go 中的训练部分）、serialization 生成代码、
+    上游测试与示例；
+  - 用手写 protobuf 解码器（model_decode.go）替代 google.golang.org/protobuf；
+  - 用标准库 maps/slices 替代 golang.org/x/exp；
+  - 用 float64 log-sum-exp 替代 github.com/shopspring/decimal 计算 softmax 置信度；
+  - 缺失的模型缓存为空表；新增 AvailableLanguages()。

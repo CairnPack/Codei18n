@@ -51,6 +51,9 @@ type Comment struct {
 	// IndexRange 是写入 index.json 的坐标（列为 UTF-16 码元），由扫描器填充，不参与 JSON 输出。
 	IndexRange TextRange `json:"-"`
 
+	// TextHash 是归一化原文的 SHA-1（docs/index-format.md §6.2），由扫描器填充并随增量缓存保存。
+	TextHash string `json:"-"`
+
 	// PartSymbols 记录合并前各物理注释各自的符号，用于把旧版逐行 ID 的译文迁移到合并后的 ID。
 	PartSymbols []string `json:"-"`
 	// PartTexts 记录合并前各物理注释的原文，与 PartSymbols 一一对应。

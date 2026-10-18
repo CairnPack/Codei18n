@@ -47,6 +47,11 @@ type Effective struct {
 	// ProfileMissing 表示选用的配置档在全局配置中不存在。
 	ProfileMissing bool     `json:"profileMissing,omitempty"`
 	Provider       Provider `json:"providerSettings"`
+
+	// TrustedBaseURL / TrustedEndpoint 是不计项目配置时（默认 < 全局 < 所选 profile < 调用方覆盖）得到的地址。
+	// 项目配置随仓库分发、不可信：它把地址改得与此不同时，不会把凭据库中的全局令牌发过去（见 auth.go）。
+	TrustedBaseURL  string `json:"trustedBaseUrl,omitempty"`
+	TrustedEndpoint string `json:"trustedEndpoint,omitempty"`
 }
 
 // Overrides 是调用方的临时覆盖（CLI flags / GUI 临时设置），优先级最高，不写入任何文件。
@@ -127,10 +132,13 @@ func Resolve(global, project *File, ov Overrides) *Effective {
 			e.ProfileMissing = true
 		}
 	}
+	trusted := *p // 项目配置之前的状态
 	if project.Profile == nil {
 		applyProvider(p, project.legacyProvider(), LayerProject)
 	}
-	applyProvider(p, project.ProfileOverrides, LayerProject)
+	// apiKeyRef 决定读取凭据库中的哪个令牌，只接受全局配置与调用方的设置：项目文件随仓库分发，
+	// 不能借此读取用户的其他令牌。
+	applyProvider(p, withoutKeyRef(project.ProfileOverrides), LayerProject)
 
 	setStr(&e.SourceLanguage, ov.SourceLanguage, LayerOverride)
 	setStr(&e.LocalLanguage, ov.LocalLanguage, LayerOverride)
@@ -138,6 +146,12 @@ func Resolve(global, project *File, ov Overrides) *Effective {
 		e.ExcludePatterns.set(append([]string(nil), ov.ExcludePatterns...), LayerOverride)
 	}
 	applyProvider(p, &ov.Provider, LayerOverride)
+	applyProvider(&trusted, &ov.Provider, LayerOverride)
+	e.TrustedBaseURL = trusted.BaseURL.Value
+	e.TrustedEndpoint = trusted.Endpoint.Value
+	if e.TrustedEndpoint == "" && strings.EqualFold(trusted.Name.Value, "ollama") {
+		e.TrustedEndpoint = DefaultOllamaEndpoint
+	}
 
 	// 与 provider 相关的默认值在最后补齐，来源仍标记为 default。
 	if p.Model.Value == "" {
@@ -158,6 +172,20 @@ func Resolve(global, project *File, ov Overrides) *Effective {
 		p.Concurrency.set(DefaultConcurrency, LayerDefault)
 	}
 	return e
+}
+
+// EndpointTrusted 判断生效的 baseUrl / endpoint 是否与不计项目配置时一致。
+func (e *Effective) EndpointTrusted() bool {
+	return e.Provider.BaseURL.Value == e.TrustedBaseURL && e.Provider.Endpoint.Value == e.TrustedEndpoint
+}
+
+func withoutKeyRef(f *ProviderFields) *ProviderFields {
+	if f == nil {
+		return nil
+	}
+	cp := *f
+	cp.APIKeyRef = nil
+	return &cp
 }
 
 // ProfileName 返回令牌引用使用的配置档名：未选用时为 "default"。

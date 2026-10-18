@@ -46,7 +46,9 @@ func (t *LLMTranslator) Translate(ctx context.Context, text, from, to string) (s
 			"2. Maintain the tone and style of the original comment.\n"+
 			"3. Output ONLY the translated text, no explanations or quotes.\n"+
 			"4. If the text is already in the target language, return it as is.\n"+
-			"5. Preserve all line breaks and formatting.\n\n"+
+			"5. Preserve all line breaks and formatting.\n"+
+			"6. Tokens like ⟦0⟧, ⟦1⟧ are placeholders for protected code, tags and references. Keep every placeholder exactly as written, the same number of times and in the same order; never translate, remove, add or reorder them.\n"+
+			"7. Preserve the Markdown structure (lists, emphasis, inline code, code fences).\n\n"+
 			"Original: %s",
 		from, to, text,
 	)
@@ -144,7 +146,9 @@ func (t *LLMTranslator) buildBatchPrompt(texts []string, from, to string) string
 			"3. The number of elements MUST match the input.\n"+
 			"4. Keep technical terms, variable names, and code snippets unchanged.\n"+
 			"5. If a comment is already in the target language, return it as is.\n"+
-			"6. Preserve all line breaks and formatting.\n\n"+
+			"6. Preserve all line breaks and formatting.\n"+
+			"7. Tokens like ⟦0⟧, ⟦1⟧ are placeholders for protected code, tags and references. Keep every placeholder exactly as written, the same number of times and in the same order within each element; never translate, remove, add or reorder them.\n"+
+			"8. Preserve the Markdown structure (lists, emphasis, inline code, code fences).\n\n"+
 			"Input:\n%s",
 		from, to, string(inputJSON),
 	)

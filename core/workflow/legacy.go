@@ -2,6 +2,9 @@ package workflow
 
 import (
 	"context"
+	"os"
+
+	"github.com/CairnPack/codei18n/core/secrets"
 
 	"github.com/CairnPack/codei18n/core/config"
 )
@@ -18,7 +21,9 @@ func legacyEnv(cfg *config.Config, opts TranslateOptions) *Env {
 	if opts.BatchSize > 0 {
 		ov.Provider.BatchSize = config.Ptr(opts.BatchSize)
 	}
-	return &Env{Root: ".", Config: config.Resolve(nil, cfg.AsFile(), ov)}
+	// 旧 API 直接读取环境变量中的令牌：同样登记到脱敏函数，避免后端错误回显非 sk- 形式的令牌。
+	envKey := secrets.NewSecret([]byte(os.Getenv("OPENAI_API_KEY")))
+	return &Env{Root: ".", Config: config.Resolve(nil, cfg.AsFile(), ov), Redact: envKey.Redact}
 }
 
 // MapUpdate 扫描 scanDir 并更新当前目录下的 .codei18n/mappings.json。

@@ -296,7 +296,8 @@ func TestSetCommentLanguageSurvivesRescan(t *testing.T) {
 	}
 	recs, _ := p.Comments()
 	id := recs[0].ID
-	if recs[0].SourceKey != "zh-CN" {
+	// 含假名，识别为日语；日语既不是源语言也不是本地语言，按规范码存放在 ja 键下。
+	if recs[0].SourceKey != "ja" || recs[0].Lang != "ja" || recs[0].LangSource != index.LangSourceDetected {
 		t.Fatalf("%+v", recs[0])
 	}
 	if err := p.SetCommentLanguage(id, "en"); err != nil {
@@ -309,8 +310,8 @@ func TestSetCommentLanguageSurvivesRescan(t *testing.T) {
 		if r.Lang != "en" || r.LangSource != index.LangSourceOverride || r.SourceKey != "en" || r.Original != "// 漢字だけ" {
 			t.Fatalf("%+v", r)
 		}
-		if _, ok := r.Texts["zh-CN"]; ok {
-			t.Fatalf("原文应从 zh-CN 键移走: %+v", r.Texts)
+		if _, ok := r.Texts["ja"]; ok {
+			t.Fatalf("原文应从 ja 键移走: %+v", r.Texts)
 		}
 	}
 	check()

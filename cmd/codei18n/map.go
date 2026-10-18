@@ -17,6 +17,8 @@ var (
 	mapScanDir string
 	mapDryRun  bool
 	mapLang    string
+	mapPrune   bool
+	mapNoCache bool
 )
 
 // mapCmd represents the map command
@@ -53,6 +55,8 @@ func init() {
 
 	mapUpdateCmd.Flags().StringVar(&mapScanDir, "scan-dir", ".", "扫描目录以更新映射")
 	mapUpdateCmd.Flags().BoolVar(&mapDryRun, "dry-run", false, "仅显示变更，不写入文件")
+	mapUpdateCmd.Flags().BoolVar(&mapPrune, "prune", false, "删除源码中已不存在的映射条目（只能扫描整个项目时使用）")
+	mapUpdateCmd.Flags().BoolVar(&mapNoCache, "no-cache", false, "不使用增量扫描缓存，重新解析所有文件")
 
 	mapGetCmd.Flags().StringVar(&mapLang, "lang", "", "目标语言代码 (默认使用配置中的 LocalLanguage)")
 }
@@ -62,12 +66,21 @@ func runMapUpdate() {
 	ctx, cancel := signalContext()
 	defer cancel()
 
-	result, err := p.UpdateMappings(ctx, codei18n.MapOptions{ScanDir: mapScanDir, DryRun: mapDryRun})
+	result, err := p.UpdateMappings(ctx, codei18n.MapOptions{ScanDir: mapScanDir, DryRun: mapDryRun, Prune: mapPrune, NoCache: mapNoCache})
 	if err != nil {
 		log.Fatal("Map update failed: %v", err)
 	}
 
 	log.Success("发现 %d 条注释，新增 %d 条映射", result.TotalComments, result.AddedCount)
+	if result.MigratedCount > 0 {
+		log.Info("其中 %d 条从旧 ID 继承了已有译文", result.MigratedCount)
+	}
+	switch {
+	case result.Pruned > 0:
+		log.Success("已清理 %d 条源码中已不存在的映射", result.Pruned)
+	case result.Orphans > 0:
+		log.Info("有 %d 条映射在源码中已不存在，可使用 --prune 清理", result.Orphans)
+	}
 	if mapDryRun {
 		log.Info("Dry run 模式，不保存文件")
 	} else {

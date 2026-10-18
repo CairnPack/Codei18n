@@ -21,6 +21,8 @@ type Store struct {
 	mu      sync.RWMutex
 	mapping *domain.Mapping
 	path    string
+	// dirty 表示自 Load 以来内容是否发生过实际变化（写入相同的值不算）。
+	dirty bool
 }
 
 // NewStore 创建映射存储；path 为空时只在内存中使用。
@@ -58,7 +60,15 @@ func (s *Store) Load() error {
 	if s.mapping.Comments == nil {
 		s.mapping.Comments = make(map[string]map[string]string)
 	}
+	s.dirty = false
 	return nil
+}
+
+// Dirty 返回自 Load 以来内容是否发生过实际变化。
+func (s *Store) Dirty() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.dirty
 }
 
 // Save 把映射原子写入磁盘。
@@ -132,7 +142,11 @@ func (s *Store) Set(id, lang, text string) {
 		s.mapping.Comments[id] = make(map[string]string)
 	}
 	cleanText := strings.TrimRight(text, "\r\n")
+	if old, ok := s.mapping.Comments[id][lang]; ok && old == cleanText {
+		return
+	}
 	s.mapping.Comments[id][lang] = cleanText
+	s.dirty = true
 }
 
 // DeleteLang 删除某条注释的某种语言文本。
@@ -140,7 +154,10 @@ func (s *Store) DeleteLang(id, lang string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if langs, ok := s.mapping.Comments[id]; ok {
-		delete(langs, lang)
+		if _, has := langs[lang]; has {
+			delete(langs, lang)
+			s.dirty = true
+		}
 	}
 }
 
@@ -149,7 +166,10 @@ func (s *Store) Delete(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	delete(s.mapping.Comments, id)
+	if _, ok := s.mapping.Comments[id]; ok {
+		delete(s.mapping.Comments, id)
+		s.dirty = true
+	}
 }
 
 // IDs 返回所有注释 ID。
@@ -167,8 +187,11 @@ func (s *Store) IDs() []string {
 func (s *Store) SetLanguages(source, target string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.mapping.SourceLanguage = source
-	s.mapping.TargetLanguage = target
+	if s.mapping.SourceLanguage != source || s.mapping.TargetLanguage != target {
+		s.mapping.SourceLanguage = source
+		s.mapping.TargetLanguage = target
+		s.dirty = true
+	}
 }
 
 // GetMapping 返回底层映射对象。调用方不得在其他 goroutine 写入 Store 时读写它；

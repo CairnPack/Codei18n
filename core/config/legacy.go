@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,9 +90,19 @@ func (c *Config) Sanitize() *Config {
 		if IsSensitiveKey(k) {
 			continue
 		}
-		newCfg.TranslationConfig[k] = v
+		newCfg.TranslationConfig[k] = stripURLCredentials(v)
 	}
 	return &newCfg
+}
+
+// stripURLCredentials 去掉形如 https://user:pass@host 的 URL 中内嵌的凭据；非 URL 原样返回。
+func stripURLCredentials(v string) string {
+	u, err := url.Parse(v)
+	if err != nil || u.User == nil || u.Host == "" {
+		return v
+	}
+	u.User = nil
+	return u.String()
 }
 
 // SaveConfig 把配置原子写入当前目录下的 .codei18n/config.json。

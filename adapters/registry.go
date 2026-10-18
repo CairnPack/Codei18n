@@ -5,8 +5,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/CairnPack/codei18n/adapters/csharp"
+	"github.com/CairnPack/codei18n/adapters/dart"
 	"github.com/CairnPack/codei18n/adapters/golang"
 	"github.com/CairnPack/codei18n/adapters/java"
+	"github.com/CairnPack/codei18n/adapters/kotlin"
 	"github.com/CairnPack/codei18n/adapters/rust"
 	"github.com/CairnPack/codei18n/adapters/typescript"
 	"github.com/CairnPack/codei18n/core"
@@ -17,11 +20,18 @@ var languageIDs = map[string]string{
 	".go":     "go",
 	".rs":     "rust",
 	".js":     "javascript",
+	".mjs":    "javascript",
+	".cjs":    "javascript",
 	".jsx":    "jsx",
 	".ts":     "typescript",
+	".mts":    "typescript",
+	".cts":    "typescript",
 	".tsx":    "tsx",
 	".java":   "java",
 	".kt":     "kotlin",
+	".kts":    "kotlin",
+	".cs":     "csharp",
+	".dart":   "dart",
 	".groovy": "groovy",
 	".scala":  "scala",
 }
@@ -43,12 +53,16 @@ func GetAdapter(filename string) (core.LanguageAdapter, error) {
 		return golang.NewAdapter(), nil
 	case ".rs":
 		return rust.NewRustAdapter(), nil
-	case ".js", ".jsx", ".ts", ".tsx":
+	case ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts":
 		return typescript.NewAdapter(), nil
 	case ".java":
 		return java.NewAdapter("java"), nil
-	case ".kt":
-		return java.NewAdapter("kotlin"), nil
+	case ".kt", ".kts":
+		return kotlin.NewAdapter(), nil
+	case ".cs":
+		return csharp.NewAdapter(), nil
+	case ".dart":
+		return dart.NewAdapter(), nil
 	case ".groovy":
 		return java.NewAdapter("groovy"), nil
 	case ".scala":

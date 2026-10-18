@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// 库代码（除 cmd/ 与 internal/log 外的所有非测试 Go 文件）不得打印、不得退出进程、不得使用终端 UI 依赖。
+// 库代码（除 cmd/、scripts/ 与 internal/log 外的所有非测试 Go 文件）不得打印、不得退出进程、不得使用终端 UI 依赖。
 // spinner 与彩色输出只允许出现在 cmd/。
 func TestLibraryCodeDoesNotPrintOrExit(t *testing.T) {
 	forbiddenImports := map[string]bool{
@@ -33,7 +33,7 @@ func TestLibraryCodeDoesNotPrintOrExit(t *testing.T) {
 		slash := filepath.ToSlash(path)
 		if d.IsDir() {
 			switch slash {
-			case "cmd", "internal/log", "tests", "specs", ".git", "openspec", "docs":
+			case "cmd", "scripts", "internal/log", "tests", "specs", ".git", "openspec", "docs":
 				return filepath.SkipDir
 			}
 			return nil

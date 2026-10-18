@@ -179,9 +179,10 @@ public class Test {
 	adapter := NewAdapter()
 	comments, err := adapter.Parse("test.java", []byte(src))
 	assert.NoError(t, err)
-	// Comments at the top of the file may not be attached to the package declaration
-	// The specific behavior depends on the parsing by Tree-sitter.
-	assert.Greater(t, len(comments), 0)
+	// 文件头两行 // 注释按连续行注释合并规则（docs/index-format.md §6.1）合并为一条
+	assert.Len(t, comments, 1)
+	assert.Equal(t, 2, comments[0].Parts)
+	assert.Equal(t, "// Copyright (c) 2025 Example Corp\n// 本文件包含示例代码", comments[0].SourceText)
 }
 
 func TestAdapter_Parse_Range(t *testing.T) {

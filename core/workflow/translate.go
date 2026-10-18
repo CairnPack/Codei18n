@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"time"
 	"errors"
 	"fmt"
 	"sort"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/CairnPack/codei18n/core"
 	"github.com/CairnPack/codei18n/core/events"
+	"github.com/CairnPack/codei18n/core/index"
+	"github.com/CairnPack/codei18n/core/langcode"
 	"github.com/CairnPack/codei18n/core/mapping"
 )
 
@@ -22,6 +25,10 @@ type TranslateOptions struct {
 	BatchSize int
 	// OnlyIDs 非空时只翻译这些注释（用于失败重试）。
 	OnlyIDs []string
+	// SaveEvery 每完成多少批保存一次 mappings.json（默认 10）；SaveInterval 距上次保存超过该时长也保存（默认 5 秒）。
+	// 结束（含取消）时必定保存。保存在独立 goroutine 中进行，不阻塞翻译。
+	SaveEvery    int
+	SaveInterval time.Duration
 }
 
 // TranslateResult 是翻译工作流的结果。
@@ -33,6 +40,10 @@ type TranslateResult struct {
 	Failed []Failure
 	// Canceled 表示任务被取消；已完成的结果已落盘。
 	Canceled bool
+	// Requests 是去重后实际发给翻译后端的文本数（归一化后相同的原文只请求一次）。
+	Requests int
+	// Saves 是翻译过程中写 mappings.json 的次数（含结束时的一次）。
+	Saves int
 }
 
 // Failure 是一条翻译失败记录。
@@ -63,7 +74,12 @@ func TranslateMissing(ctx context.Context, env *Env, opts TranslateOptions) (*Tr
 		return nil, fmt.Errorf("加载映射文件失败: %w", err)
 	}
 
-	tasks := collectTasks(store, env.Config.SourceLanguage.Value, env.Config.LocalLanguage.Value, opts.OnlyIDs)
+	idx, err := index.Read(env.IndexPath())
+	if err != nil {
+		log.Warnf("读取 index.json 失败，按旧规则判断翻译方向: %v", err)
+		idx = nil
+	}
+	tasks := collectTasks(store, env.Config.SourceLanguage.Value, env.Config.LocalLanguage.Value, opts.OnlyIDs, originsFrom(idx))
 	if len(tasks) == 0 {
 		return &TranslateResult{TotalTasks: 0}, nil
 	}
@@ -90,17 +106,28 @@ func TranslateMissing(ctx context.Context, env *Env, opts TranslateOptions) (*Tr
 		failures = map[string]Failure{}
 	}
 
+	units := dedupe(tasks)
 	res := &TranslateResult{TotalTasks: len(tasks)}
+	// 文档注释：受保护片段换成占位符后再发给翻译器；全是受保护片段的注释不需要翻译。
+	units, direct := prepareDocs(env, idx, units)
+	for _, u := range direct {
+		for _, t := range u.tasks {
+			store.Set(t.id, t.toLang, u.text)
+			res.SuccessCount++
+		}
+	}
+	res.Requests = len(units)
 	var (
 		wg sync.WaitGroup
 		mu sync.Mutex
 	)
 	sem := make(chan struct{}, concurrency)
 	processed := 0
+	sv := startSaver(store, opts.SaveEvery, opts.SaveInterval, log)
 
 dispatch:
-	for i := 0; i < len(tasks); i += batchSize {
-		batch := tasks[i:min(i+batchSize, len(tasks))]
+	for i := 0; i < len(units); i += batchSize {
+		batch := units[i:min(i+batchSize, len(units))]
 		select {
 		case <-ctx.Done():
 			break dispatch
@@ -111,7 +138,7 @@ dispatch:
 			break
 		}
 		wg.Add(1)
-		go func(batch []task) {
+		go func(batch []*unit) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			results, err := translateBatch(ctx, trans, batch)
@@ -121,31 +148,44 @@ dispatch:
 			if err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
 				return // 因取消而中断的批次：不计成功也不计失败
 			}
+			n := 0
 			if err != nil {
-				msg := SanitizeError(err)
-				for _, t := range batch {
-					res.FailCount++
-					failures[failureKey(t)] = Failure{ID: t.id, From: t.fromLang, To: t.toLang, Error: msg}
+				msg := env.sanitize(err)
+				for _, u := range batch {
+					for _, t := range u.tasks {
+						res.FailCount++
+						failures[failureKey(t)] = Failure{ID: t.id, From: t.fromLang, To: t.toLang, Error: msg}
+						n++
+					}
 				}
 			} else {
-				for i, r := range results {
-					t := batch[i]
-					store.Set(t.id, t.toLang, r)
-					delete(failures, failureKey(t))
-					res.SuccessCount++
+				// 还原占位符并校验；不一致的单条重试 1 次，仍失败则记为失败、不写入坏译文。
+				outs, errs := restoreUnits(ctx, trans, batch, results)
+				for i, u := range batch {
+					for _, t := range u.tasks {
+						n++
+						if errs[i] != nil {
+							res.FailCount++
+							failures[failureKey(t)] = Failure{ID: t.id, From: t.fromLang, To: t.toLang, Error: env.sanitize(errs[i])}
+							continue
+						}
+						store.Set(t.id, t.toLang, outs[i])
+						delete(failures, failureKey(t))
+						res.SuccessCount++
+					}
 				}
-				if err := store.Save(); err != nil {
-					log.Warnf("保存进度失败: %v", err)
-				}
+				sv.batchDone()
 			}
-			processed += len(batch)
+			processed += n
 			env.Progress.Emit(events.Event{Phase: events.PhaseTranslate, Done: processed, Total: len(tasks)})
 		}(batch)
 	}
 	wg.Wait()
 
 	env.Progress.Emit(events.Event{Phase: events.PhaseSave, Done: 0, Total: 1})
-	if err := store.Save(); err != nil {
+	saves, err := sv.finish()
+	res.Saves = saves
+	if err != nil {
 		return nil, fmt.Errorf("保存映射文件失败: %w", err)
 	}
 	if err := saveFailures(env, failures); err != nil {
@@ -170,13 +210,42 @@ dispatch:
 	return res, nil
 }
 
-// PendingCount 返回需要翻译的条目数（与 TranslateMissing 的任务数一致）。
-func PendingCount(store *mapping.Store, source, local string) int {
-	return len(collectTasks(store, source, local, nil))
+
+// PendingCount 返回需要翻译的条目数（与 TranslateMissing 的任务数一致）。idx 可以为 nil（按旧规则判断）。
+func PendingCount(store *mapping.Store, source, local string, idx ...*index.Index) int {
+	var origins map[string]origin
+	if len(idx) > 0 {
+		origins = originsFrom(idx[0])
+	}
+	return len(collectTasks(store, source, local, nil, origins))
 }
 
-// collectTasks 找出缺失的翻译：源语言有、本地语言缺 → 正向；本地语言有、源语言缺 → 反向。
-func collectTasks(store *mapping.Store, source, local string, only []string) []task {
+// origin 是一条注释原文所在的 mappings 键与识别出的原语言（来自 index.json）。
+type origin struct {
+	key  string
+	lang string
+}
+
+func originsFrom(idx *index.Index) map[string]origin {
+	if idx == nil {
+		return nil
+	}
+	out := map[string]origin{}
+	for _, f := range idx.Files {
+		for _, c := range f.Comments {
+			out[c.ID] = origin{key: c.SourceKey, lang: c.Lang}
+		}
+	}
+	return out
+}
+
+// collectTasks 找出缺失的翻译。
+//
+// 有 index.json 时：原文在 sourceKey 下、原语言为 lang（unknown 时视为 sourceKey 的语言），
+// 目标为 {源语言, 本地语言} 中与原语言不等价、且尚无文本的那些——源语言注释补本地语言，本地语言注释补源语言，
+// 第三种语言（如 ja）的注释两者都补。
+// 没有 index.json（或该 ID 不在索引中）时沿用旧规则：源语言有、本地语言缺 → 正向；本地语言有、源语言缺 → 反向。
+func collectTasks(store *mapping.Store, source, local string, only []string, origins map[string]origin) []task {
 	m := store.Snapshot()
 	ids := make([]string, 0, len(m.Comments))
 	if len(only) > 0 {
@@ -191,6 +260,22 @@ func collectTasks(store *mapping.Store, source, local string, only []string) []t
 	for _, id := range ids {
 		translations, ok := m.Comments[id]
 		if !ok {
+			continue
+		}
+		if o, ok := origins[id]; ok && translations[o.key] != "" {
+			from := o.lang
+			if from == "" || from == langcode.Unknown {
+				from = o.key
+			}
+			for _, target := range []string{local, source} {
+				if langcode.Equivalent(target, from) || langcode.Equivalent(target, o.key) {
+					continue
+				}
+				if k := langcode.FindKey(translations, target); k != "" && translations[k] != "" {
+					continue
+				}
+				tasks = append(tasks, task{id: id, text: translations[o.key], fromLang: from, toLang: target})
+			}
 			continue
 		}
 		if enText := translations[source]; enText != "" {
@@ -208,7 +293,7 @@ func collectTasks(store *mapping.Store, source, local string, only []string) []t
 }
 
 // translateBatch 方向一致时整批请求，否则逐条翻译。
-func translateBatch(ctx context.Context, trans core.Translator, batch []task) ([]string, error) {
+func translateBatch(ctx context.Context, trans core.Translator, batch []*unit) ([]string, error) {
 	from, to := batch[0].fromLang, batch[0].toLang
 	consistent := true
 	for _, t := range batch {
@@ -220,7 +305,7 @@ func translateBatch(ctx context.Context, trans core.Translator, batch []task) ([
 	if consistent {
 		texts := make([]string, len(batch))
 		for i, t := range batch {
-			texts[i] = t.text
+			texts[i] = t.payload()
 		}
 		results, err := trans.TranslateBatch(ctx, texts, from, to)
 		if err == nil && len(results) != len(texts) {
@@ -230,7 +315,7 @@ func translateBatch(ctx context.Context, trans core.Translator, batch []task) ([
 	}
 	results := make([]string, len(batch))
 	for i, t := range batch {
-		r, err := trans.Translate(ctx, t.text, t.fromLang, t.toLang)
+		r, err := trans.Translate(ctx, t.payload(), t.fromLang, t.toLang)
 		if err != nil {
 			return nil, err
 		}
