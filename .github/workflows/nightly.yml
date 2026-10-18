@@ -1,0 +1,203 @@
+name: Nightly
+
+# 每日构建 Windows CLI，并发布为滚动预发布 `nightly`（不会成为 latest）。
+#
+# 是否构建的判定方式：比较默认分支 HEAD 与现有 `nightly` tag 指向的提交。
+#   - 两者相同：自上次成功的 nightly 以来没有新代码，跳过整个构建。
+#   - 两者不同，或 `nightly` tag 尚不存在：构建并发布，成功后才把 `nightly` tag 移到 HEAD。
+# 因为 tag 只在发布成功后移动，某次构建失败时 tag 停留在旧提交，第二天会自动重试。
+#
+# pull_request 只构建、不发布，用来在 PR 上验证 workflow 本身能跑通。
+# 只使用 GITHUB_TOKEN（contents: write），不需要任何 PAT 或密钥。
+
+on:
+  schedule:
+    # UTC 16:00，即台北时间 0 点。schedule 只在默认分支生效。
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/nightly.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: 判定是否需要构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+      publish: ${{ steps.decide.outputs.publish }}
+      head: ${{ steps.decide.outputs.head }}
+      previous: ${{ steps.decide.outputs.previous }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 比较 HEAD 与 nightly tag
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          previous=$(git rev-parse -q --verify 'refs/tags/nightly^{commit}' || true)
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          if [[ "$EVENT" == pull_request ]]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "PR 验证：只构建、不发布。" >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$REF_NAME" != "$DEFAULT_BRANCH" ]]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "只从默认分支 $DEFAULT_BRANCH 发布 nightly，当前为 $REF_NAME，跳过。" >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$head" == "$previous" ]]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "HEAD ${head:0:7} 与 nightly tag 相同，没有新代码，跳过构建。" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "HEAD ${head:0:7} 与 nightly tag（${previous:0:7}）不同，构建并发布。" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  build:
+    name: 构建 Windows CLI（cgo）
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+
+      # tree-sitter 需要 cgo。runner 镜像通常自带 MinGW gcc，没有时再用 MSYS2 安装。
+      - name: 检查 MinGW gcc
+        id: gcc
+        shell: pwsh
+        run: |
+          $gcc = Get-Command gcc -ErrorAction SilentlyContinue
+          if ($gcc) {
+            Write-Host "gcc: $($gcc.Source)"
+            & gcc --version | Select-Object -First 1
+            "missing=false" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host 'runner 上没有 gcc，改用 MSYS2 安装。'
+            "missing=true" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: 安装 MinGW gcc（MSYS2）
+        if: steps.gcc.outputs.missing == 'true'
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-gcc
+          path-type: inherit
+
+      - name: 把 MSYS2 gcc 加入 PATH
+        if: steps.gcc.outputs.missing == 'true'
+        shell: pwsh
+        run: |
+          "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin" >> $env:GITHUB_PATH
+
+      - name: 构建
+        env:
+          CGO_ENABLED: '1'
+          GOTOOLCHAIN: go1.27.1
+          SHA: ${{ needs.check.outputs.head }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="nightly-$(TZ=Asia/Taipei date +%Y%m%d)-${SHA:0:7}"
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w -X main.version=$version" -o dist/codei18n-windows-amd64.exe ./cmd/codei18n
+          ./dist/codei18n-windows-amd64.exe --version
+          cd dist
+          sha256sum codei18n-windows-amd64.exe | sed 's/ \*/  /' > codei18n-windows-amd64.exe.sha256
+          cat codei18n-windows-amd64.exe.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nightly-dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: 发布 nightly 预发布
+    needs: [check, build]
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-dist
+          path: dist
+
+      - name: 移动 nightly tag 并替换预发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ needs.check.outputs.head }}
+          PREVIOUS: ${{ needs.check.outputs.previous }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          short=${HEAD_SHA:0:7}
+          title="Nightly $(TZ=Asia/Taipei date +%Y-%m-%d) (${short})"
+          {
+            echo "自动构建的每日预发布，对应提交 ${HEAD_SHA}。不是正式版，可能不稳定。"
+            echo
+            echo "本构建只提供 Windows amd64 二进制（core 依赖 tree-sitter，必须 cgo 构建）。"
+            echo
+            if [[ -n "$PREVIOUS" ]] && git merge-base --is-ancestor "$PREVIOUS" "$HEAD_SHA"; then
+              echo "## 自上次 nightly（${PREVIOUS:0:7}）以来的提交"
+              echo
+              echo '```'
+              git log --oneline "${PREVIOUS}..${HEAD_SHA}"
+              echo '```'
+            else
+              echo "## 最近的提交（没有可比较的上次 nightly）"
+              echo
+              echo '```'
+              git log --oneline -20 "$HEAD_SHA"
+              echo '```'
+            fi
+          } > notes.md
+
+          git tag -f nightly "$HEAD_SHA"
+          git push -f origin refs/tags/nightly
+
+          if gh release view nightly > /dev/null 2>&1; then
+            gh release edit nightly --title "$title" --notes-file notes.md --prerelease --latest=false
+            gh release view nightly --json assets --jq '.assets[].name' | while IFS= read -r name; do
+              gh release delete-asset nightly "$name" --yes
+            done
+            gh release upload nightly dist/* --clobber
+          else
+            gh release create nightly dist/* --verify-tag --title "$title" --notes-file notes.md --prerelease --latest=false
+          fi

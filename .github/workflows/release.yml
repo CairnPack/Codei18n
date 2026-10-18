@@ -1,180 +1,145 @@
 name: Release
 
+# 推送 v*.*.* tag 时在 Windows runner 上用 cgo 构建 CLI 并创建 GitHub Release。
+# core 依赖 tree-sitter，必须 CGO_ENABLED=1，无法用 GOOS 交叉编译，所以只发布 Windows amd64 二进制，
+# 与手动发布的 v0.2.0 一致。其他平台需要在目标平台上自行用 cgo 构建。
+#
+# pull_request 只构建、不发布，用来在 PR 上验证 workflow 本身能跑通。
+
 on:
   push:
     tags:
       - 'v*.*.*'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/release.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  # 创建 GitHub Release
-  release:
-    name: 创建 Release
-    runs-on: ubuntu-latest
+  build:
+    name: 测试并构建 Windows CLI（cgo）
+    runs-on: windows-latest
+    timeout-minutes: 30
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
-      - name: 设置 Go 环境
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: '1.27.1'
+          cache: true
+
+      # tree-sitter 需要 cgo。runner 镜像通常自带 MinGW gcc，没有时再用 MSYS2 安装。
+      - name: 检查 MinGW gcc
+        id: gcc
+        shell: pwsh
+        run: |
+          $gcc = Get-Command gcc -ErrorAction SilentlyContinue
+          if ($gcc) {
+            Write-Host "gcc: $($gcc.Source)"
+            & gcc --version | Select-Object -First 1
+            "missing=false" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host 'runner 上没有 gcc，改用 MSYS2 安装。'
+            "missing=true" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: 安装 MinGW gcc（MSYS2）
+        if: steps.gcc.outputs.missing == 'true'
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-gcc
+          path-type: inherit
+
+      - name: 把 MSYS2 gcc 加入 PATH
+        if: steps.gcc.outputs.missing == 'true'
+        shell: pwsh
+        run: |
+          "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin" >> $env:GITHUB_PATH
 
       - name: 运行测试
-        run: make test
-
-      - name: 构建多平台二进制文件
-        run: |
-          # 创建 dist 目录
-          mkdir -p dist
-          
-          # Linux AMD64
-          GOOS=linux GOARCH=amd64 go build -o dist/codei18n-linux-amd64 ./cmd/codei18n
-          tar -czf dist/codei18n-linux-amd64.tar.gz -C dist codei18n-linux-amd64
-          
-          # Linux ARM64
-          GOOS=linux GOARCH=arm64 go build -o dist/codei18n-linux-arm64 ./cmd/codei18n
-          tar -czf dist/codei18n-linux-arm64.tar.gz -C dist codei18n-linux-arm64
-          
-          # macOS AMD64
-          GOOS=darwin GOARCH=amd64 go build -o dist/codei18n-darwin-amd64 ./cmd/codei18n
-          tar -czf dist/codei18n-darwin-amd64.tar.gz -C dist codei18n-darwin-amd64
-          
-          # macOS ARM64 (Apple Silicon)
-          GOOS=darwin GOARCH=arm64 go build -o dist/codei18n-darwin-arm64 ./cmd/codei18n
-          tar -czf dist/codei18n-darwin-arm64.tar.gz -C dist codei18n-darwin-arm64
-          
-          # Windows AMD64
-          GOOS=windows GOARCH=amd64 go build -o dist/codei18n-windows-amd64.exe ./cmd/codei18n
-          cd dist && zip codei18n-windows-amd64.zip codei18n-windows-amd64.exe && cd ..
-          
-          # Windows ARM64
-          GOOS=windows GOARCH=arm64 go build -o dist/codei18n-windows-arm64.exe ./cmd/codei18n
-          cd dist && zip codei18n-windows-arm64.zip codei18n-windows-arm64.exe && cd ..
-
-      - name: 生成 Checksums
-        run: |
-          cd dist
-          sha256sum *.tar.gz *.zip > checksums.txt
-          cat checksums.txt
-
-      - name: 生成 Release Notes
-        id: release_notes
-        run: |
-          # 提取版本号
-          VERSION=${GITHUB_REF#refs/tags/}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          
-          # 生成 Release Notes
-          cat > release_notes.md << EOF
-          # CodeI18n $VERSION
-          
-          ## 下载
-          
-          选择适合您平台的版本下载：
-          
-          - **Linux**: \`codei18n-linux-amd64.tar.gz\` 或 \`codei18n-linux-arm64.tar.gz\`
-          - **macOS**: \`codei18n-darwin-amd64.tar.gz\` (Intel) 或 \`codei18n-darwin-arm64.tar.gz\` (Apple Silicon)
-          - **Windows**: \`codei18n-windows-amd64.zip\` 或 \`codei18n-windows-arm64.zip\`
-          
-          ## 安装
-          
-          ### Linux / macOS
-          
-          \`\`\`bash
-          # 下载并解压
-          tar -xzf codei18n-*.tar.gz
-          
-          # 移动到 PATH
-          sudo mv codei18n-* /usr/local/bin/codei18n
-          
-          # 添加执行权限
-          sudo chmod +x /usr/local/bin/codei18n
-          
-          # 验证安装
-          codei18n --version
-          \`\`\`
-          
-          ### Windows
-          
-          1. 下载 \`codei18n-windows-*.zip\`
-          2. 解压到合适的目录
-          3. 将目录添加到 PATH 环境变量
-          
-          ## 验证下载
-          
-          使用 checksums.txt 验证下载文件的完整性：
-          
-          \`\`\`bash
-          sha256sum -c checksums.txt
-          \`\`\`
-          
-          ## 更新日志
-          
-          请查看 [CHANGELOG.md](CHANGELOG.md) 了解详细的更新内容。
-          
-          ## 文档
-          
-          - [使用指南](README.md)
-          - [快速开始](specs/001-codei18n-core-mvp/quickstart.md)
-          - [开发文档](CODEBUDDY.md)
-          EOF
-
-      - name: 创建 GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          body_path: release_notes.md
-          files: |
-            dist/*.tar.gz
-            dist/*.zip
-            dist/checksums.txt
-          draft: false
-          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CGO_ENABLED: '1'
+          GOTOOLCHAIN: go1.27.1
+        run: go test -short ./...
 
-  # Docker 镜像构建（可选）
-  docker:
-    name: 构建 Docker 镜像
+      - name: 构建
+        env:
+          CGO_ENABLED: '1'
+          GOTOOLCHAIN: go1.27.1
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$REF_TYPE" == tag ]]; then version="${REF_NAME#v}"; else version="dev-${SHA:0:7}"; fi
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w -X main.version=$version" -o dist/codei18n-windows-amd64.exe ./cmd/codei18n
+          ./dist/codei18n-windows-amd64.exe --version
+          cd dist
+          sha256sum codei18n-windows-amd64.exe | sed 's/ \*/  /' > codei18n-windows-amd64.exe.sha256
+          cat codei18n-windows-amd64.exe.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: 创建 Release
+    needs: build
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: 设置 Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: 登录 Docker Hub
-        uses: docker/login-action@v3
+      - uses: actions/download-artifact@v4
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-        if: github.event_name != 'pull_request'
+          name: release-dist
+          path: dist
 
-      - name: 提取元数据
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ${{ secrets.DOCKER_USERNAME }}/codei18n
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: 构建并推送
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: 生成正文并创建 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          sha=$(cut -d' ' -f1 dist/codei18n-windows-amd64.exe.sha256)
+          {
+            echo '> **本版只提供 Windows amd64 二进制。** core 依赖 tree-sitter，必须开启 cgo 构建（`CGO_ENABLED=1`，Windows 上需要 MinGW gcc），无法用 `GOOS` 直接交叉编译。其他平台请在目标平台上自行用 cgo 构建：`CGO_ENABLED=1 go build -o codei18n ./cmd/codei18n`'
+            echo
+            echo '## 下载'
+            echo
+            echo '| 文件 | 说明 |'
+            echo '| --- | --- |'
+            echo '| `codei18n-windows-amd64.exe` | Windows x64 命令行程序（cgo + MinGW 构建） |'
+            echo '| `codei18n-windows-amd64.exe.sha256` | SHA-256 校验值 |'
+            echo
+            echo "SHA-256：\`${sha}\`"
+            echo
+            echo '## 更新日志'
+            # 取 CHANGELOG.md 中 "## [版本]" 一节；没有时提示查看 CHANGELOG。
+            section=$(awk -v v="$version" 'index($0, "## [" v "]") == 1 {f=1; next} f && /^## \[/ {exit} f' CHANGELOG.md)
+            if [[ -n "${section//[[:space:]]/}" ]]; then
+              echo "$section"
+            else
+              echo
+              echo "CHANGELOG.md 中没有 ${version} 一节，请查看 [CHANGELOG.md](CHANGELOG.md)。"
+            fi
+          } > notes.md
+          flags=()
+          if [[ "$version" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$TAG" dist/* --verify-tag --title "$TAG" --notes-file notes.md "${flags[@]}"
